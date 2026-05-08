@@ -10,34 +10,38 @@ final class LoginWindow: NSObject {
     private var onComplete: ((String?) -> Void)?
     private var state: LoginState = .idle
 
-    private nonisolated static let allowedDomains: Set<String> = [
-        // Cursor
-        "cursor.com",
-        "www.cursor.com",
-        "authenticator.cursor.sh",
-        "authenticate.cursor.sh",
-        // Auth providers
+    // Tier 1: exact-match hosts. Tightened from suffix matching for parents
+    // with large attack surface (google.com, github.com, stripe.com) where
+    // a subdomain takeover or open redirect could pivot through this WebView.
+    private nonisolated static let exactHosts: Set<String> = [
+        // Cursor primary
+        "cursor.com", "www.cursor.com",
+        "authenticator.cursor.sh", "authenticate.cursor.sh",
+        // Google OAuth
+        "accounts.google.com", "oauth2.googleapis.com",
+        // GitHub OAuth
+        "github.com", "api.github.com",
+        // Stripe (Cursor dashboard payment widgets)
+        "js.stripe.com", "m.stripe.network",
+        // WorkOS API (non-tenant)
         "api.workos.com",
-        "accounts.google.com",
-        "github.com",
-        // Enterprise SSO (Azure AD)
+        // Azure AD entry
         "login.microsoftonline.com",
-        // Stripe (Cursor dashboard payment)
-        "js.stripe.com",
-        "m.stripe.network",
+    ]
+
+    // Tier 2: suffix matching kept only where exact enumeration is impractical
+    // (internal Cursor service segmentation, tenant-scoped SSO).
+    private nonisolated static let allowedSuffixes: [String] = [
+        ".cursor.com",
+        ".cursor.sh",
+        ".workos.com",
+        ".microsoftonline.com",
     ]
 
     nonisolated static func isAllowedHost(_ host: String) -> Bool {
-        if allowedDomains.contains(host) { return true }
-        if host.hasSuffix(".cursor.com") { return true }
-        if host.hasSuffix(".cursor.sh") { return true }
-        if host.hasSuffix(".workos.com") { return true }
-        if host.hasSuffix(".google.com") { return true }
-        if host.hasSuffix(".github.com") { return true }
-        if host.hasSuffix(".microsoftonline.com") { return true }
-        if host.hasSuffix(".stripe.com") { return true }
-        if host.hasSuffix(".stripe.network") { return true }
-        return false
+        let h = host.lowercased()
+        if exactHosts.contains(h) { return true }
+        return allowedSuffixes.contains { h.hasSuffix($0) }
     }
 
     func open(onComplete: @escaping (String?) -> Void) {
