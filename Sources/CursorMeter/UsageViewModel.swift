@@ -133,7 +133,11 @@ final class UsageViewModel {
         } catch APIError.unauthorized {
             Log.info("Session expired, clearing keychain")
             cachedCookieHeader = nil
-            try? KeychainStore.deleteCookieHeader()
+            do {
+                try KeychainStore.deleteCookieHeader()
+            } catch {
+                Log.error("Keychain delete failed: \(error.localizedDescription)")
+            }
             authState = .loginRequired
             usageData = nil
             stopAutoRefresh()
@@ -159,7 +163,11 @@ final class UsageViewModel {
 
     func logout() {
         cachedCookieHeader = nil
-        try? KeychainStore.deleteCookieHeader()
+        do {
+            try KeychainStore.deleteCookieHeader()
+        } catch {
+            Log.error("Keychain delete failed: \(error.localizedDescription)")
+        }
         authState = .loggedOut
         usageData = nil
         errorMessage = nil
