@@ -51,6 +51,14 @@ Used for parents with broad attack surface where suffix matching could let a sub
 | `api.workos.com` | WorkOS non-tenant API |
 | `login.microsoftonline.com` | Azure AD entry |
 
+### Tier 1 — Google OAuth ccTLD redirects
+
+Google routes some users through `accounts.google.<ccTLD>` (for example `accounts.google.co.kr`) before landing on `accounts.google.com`. Without these entries the WebView blocks the locale hop, forcing Google's fallback path and adding user-visible friction.
+
+We list `accounts.google.<ccTLD>` for the top ~50 markets only. This is intentionally narrow: only the `accounts` subdomain is covered, so locale variants of `sites`, `mail`, `pages`, etc. remain blocked. The list is maintained reactively — file an issue if a missing country triggers a block.
+
+Background: Google announced in April 2025 that it is phasing out ccTLDs in favor of unified `.com` routing, so this list is expected to shrink in relevance over time.
+
 ### Tier 2 — suffix match
 
 Used only where exact enumeration is impractical (internal Cursor service segmentation, tenant-scoped SSO).
@@ -76,6 +84,15 @@ Before persisting cookies to Keychain, `captureAndComplete` verifies that all na
 ### Accepted residual risk
 
 Subdomain takeover of an entity under one of the Tier 2 suffix providers (e.g. an unmaintained `*.workos.com` tenant) could in principle reach the login WebView. The blast radius is limited to a single Cursor login session; we accept this risk in exchange for supporting tenant-scoped SSO without an unbounded enumeration burden.
+
+### Authentication features unsupported in WebView
+
+The login WebView is a `WKWebView` in an ad-hoc-signed app, not a full system browser. The following Google account features rely on entitlements (`com.apple.developer.web-browser`, associated domains, iCloud Keychain passkey access) that are only granted to paid Apple Developer Program members and do not work here:
+
+- **Passkey / WebAuthn** (Bluetooth or platform authenticator)
+- **Cross-device sign-in** that depends on iCloud Keychain passkey sync
+
+Affected users should fall back to password + 2FA, an emailed verification code, or an alternative provider (GitHub, email link). This is a constraint of the build signature, not a CursorMeter design choice; the same applies to other ad-hoc-signed macOS apps that embed Google OAuth in a WebView. See also the related Keychain Data Protection limitation tracked in the project issue tracker.
 
 ## Out of Scope
 
