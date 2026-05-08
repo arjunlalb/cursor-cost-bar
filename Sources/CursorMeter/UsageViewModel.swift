@@ -23,6 +23,37 @@ enum RefreshInterval: Int, CaseIterable {
     }
 }
 
+// MARK: - Jump Effect Types
+
+/// Magnitude of a usage jump between successive refreshes.
+struct JumpEvent: Sendable, Equatable {
+    enum Tier: Int, Sendable { case zero = 0, one = 1, two = 2 }
+
+    /// Display mode the delta was computed in. Determines `displayDelta` formatting.
+    enum Mode: Sendable, Equatable {
+        case credit       // USD cents
+        case request      // request count
+        case percent      // server-provided percent (%-points)
+    }
+
+    let tier: Tier
+    /// Delta in canonical units (cents / requests / %-points).
+    let deltaCanonical: Double
+    /// Delta as % of plan limit (used for tier classification).
+    let deltaPct: Double
+    let mode: Mode
+    /// User-facing string already formatted with sign (e.g. "+$0.30", "+30 / 50", "+15.0%").
+    let displayDelta: String
+    let timestamp: Date
+}
+
+/// User-selectable visual intensity for the jump effect.
+enum JumpIntensity: Int, Sendable, CaseIterable {
+    case quiet = 0
+    case normal = 1
+    case bold = 2
+}
+
 @Observable
 @MainActor
 final class UsageViewModel {
@@ -44,6 +75,14 @@ final class UsageViewModel {
     /// 0 = none, 1 = fraction (e.g. 120/500), 2 = percent (e.g. 24%)
     var menuBarDisplayMode: Int = 0
 
+    // MARK: - Jump Effect
+
+    /// Last detected jump (set on every successful refresh that produced a positive delta).
+    /// `nil` while no jump has occurred since launch (or after skip conditions).
+    var lastJump: JumpEvent?
+    var jumpEffectEnabled: Bool = true
+    var jumpIntensity: JumpIntensity = .normal
+
     // MARK: - Private
 
     private var isRefreshing = false
@@ -51,6 +90,13 @@ final class UsageViewModel {
     private var refreshTask: Task<Void, Never>?
     private var cachedCookieHeader: String?
     private let notificationManager = NotificationManager()
+
+    // Previous canonical values for delta tracking. Reset to nil when display mode changes
+    // (e.g. plan migration) so we don't compare across incompatible units.
+    private var previousPlanUsedCents: Int?
+    private var previousRequestsUsed: Int?
+    private var previousServerPercent: Double?
+    private var previousMode: JumpEvent.Mode?
 
     // MARK: - Init
 
@@ -120,6 +166,12 @@ final class UsageViewModel {
             Log.info("Usage data refreshed")
             networkRetryTask?.cancel()
             networkRetryTask = nil
+
+            // Compute jump delta against previous canonical value (skip on first refresh,
+            // mode change, or non-positive delta).
+            if let data = usageData {
+                updateJumpState(from: data)
+            }
 
             // Check notification thresholds
             if let data = usageData {
@@ -206,6 +258,16 @@ final class UsageViewModel {
         UserDefaults.standard.set(mode, forKey: "menuBarDisplayMode")
     }
 
+    func setJumpEffectEnabled(_ enabled: Bool) {
+        jumpEffectEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "jumpEffectEnabled")
+    }
+
+    func setJumpIntensity(_ intensity: JumpIntensity) {
+        jumpIntensity = intensity
+        UserDefaults.standard.set(intensity.rawValue, forKey: "jumpIntensity")
+    }
+
     func checkForUpdate() async {
         isCheckingUpdate = true
         async let result = UpdateChecker.shared.check()
@@ -248,6 +310,14 @@ final class UsageViewModel {
                 menuBarDisplayMode = 1
             }
         }
+        if let val = defaults.object(forKey: "jumpEffectEnabled") as? Bool {
+            jumpEffectEnabled = val
+        }
+        if let raw = defaults.object(forKey: "jumpIntensity") as? Int,
+           let intensity = JumpIntensity(rawValue: raw)
+        {
+            jumpIntensity = intensity
+        }
     }
 
     /// Maps an error to a user-facing message for the fallback (non-network-down, non-auth) error path.
@@ -270,6 +340,139 @@ final class UsageViewModel {
             return "Network error"
         }
         return "Unexpected error"
+    }
+
+    // MARK: - Jump Detection
+
+    /// Computes delta between this refresh and the previous canonical value, classifies
+    /// tier, and updates `lastJump`. Skip conditions (no event, only previous reset):
+    ///   - first refresh (no baseline)
+    ///   - display mode changed (unit mismatch)
+    ///   - delta ≤ 0
+    private func updateJumpState(from data: UsageDisplayData) {
+        let mode: JumpEvent.Mode
+        let current: Double
+        if data.isPercentOnly {
+            mode = .percent
+            current = data.serverPercentUsed ?? 0
+        } else if data.isCreditBased {
+            mode = .credit
+            current = Double(data.planUsedCents ?? 0)
+        } else {
+            mode = .request
+            current = Double(data.requestsUsed)
+        }
+
+        let previous: Double? = {
+            switch mode {
+            case .credit:  return previousPlanUsedCents.map(Double.init)
+            case .request: return previousRequestsUsed.map(Double.init)
+            case .percent: return previousServerPercent
+            }
+        }()
+
+        let modeChanged = previousMode != nil && previousMode != mode
+
+        // Always update the baseline for the active mode.
+        switch mode {
+        case .credit:  previousPlanUsedCents = data.planUsedCents ?? 0
+        case .request: previousRequestsUsed = data.requestsUsed
+        case .percent: previousServerPercent = data.serverPercentUsed ?? 0
+        }
+        previousMode = mode
+
+        guard let prev = previous, !modeChanged else {
+            // First refresh in this mode: only set baseline.
+            lastJump = nil
+            return
+        }
+
+        let delta = current - prev
+        guard delta > 0 else {
+            lastJump = nil
+            return
+        }
+
+        let limit: Double
+        switch mode {
+        case .credit:  limit = Double(data.planLimitCents ?? 0)
+        case .request: limit = Double(data.requestsLimit)
+        case .percent: limit = 100  // percent-only: deltas are already %-points
+        }
+
+        let event = Self.makeJumpEvent(
+            mode: mode,
+            delta: delta,
+            limit: limit,
+            timestamp: Date()
+        )
+        lastJump = event
+    }
+
+    /// Builds a `JumpEvent` from raw delta/limit. Pure function — exposed for testing.
+    /// `limit ≤ 0` triggers fixed-threshold fallback (5/15 cents, 1/5 requests, 5/15 %p).
+    nonisolated static func makeJumpEvent(
+        mode: JumpEvent.Mode,
+        delta: Double,
+        limit: Double,
+        timestamp: Date = Date()
+    ) -> JumpEvent {
+        let tier = classifyTier(mode: mode, delta: delta, limit: limit)
+        let deltaPct: Double = limit > 0 ? (delta / limit * 100.0) : 0
+        return JumpEvent(
+            tier: tier,
+            deltaCanonical: delta,
+            deltaPct: deltaPct,
+            mode: mode,
+            displayDelta: formatJumpDelta(delta, mode: mode),
+            timestamp: timestamp
+        )
+    }
+
+    /// Tier classification. Uses % of plan limit when limit > 0; otherwise falls back
+    /// to fixed canonical thresholds per mode.
+    nonisolated static func classifyTier(
+        mode: JumpEvent.Mode,
+        delta: Double,
+        limit: Double
+    ) -> JumpEvent.Tier {
+        guard delta > 0 else { return .zero }
+
+        if limit > 0 {
+            let pct = delta / limit * 100.0
+            if pct >= 15 { return .two }
+            if pct >= 5 { return .one }
+            return .zero
+        }
+
+        // Fallback when plan_limit ≤ 0 (unlimited / unknown).
+        switch mode {
+        case .credit:
+            if delta >= 15 { return .two }
+            if delta >= 5 { return .one }
+            return .zero
+        case .request:
+            if delta >= 5 { return .two }
+            if delta >= 1 { return .one }
+            return .zero
+        case .percent:
+            // Percent mode has an implicit limit of 100, but keep this branch for safety.
+            if delta >= 15 { return .two }
+            if delta >= 5 { return .one }
+            return .zero
+        }
+    }
+
+    /// Formats a positive delta as a signed user-facing string for the active display mode.
+    nonisolated static func formatJumpDelta(_ delta: Double, mode: JumpEvent.Mode) -> String {
+        switch mode {
+        case .credit:
+            return String(format: "+$%.2f", delta / 100.0)
+        case .request:
+            return "+\(Int(delta.rounded()))"
+        case .percent:
+            return String(format: "+%.1f%%", delta)
+        }
     }
 
     private var networkRetryTask: Task<Void, Never>?
