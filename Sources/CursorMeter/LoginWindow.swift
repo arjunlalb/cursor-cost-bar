@@ -44,6 +44,26 @@ final class LoginWindow: NSObject {
         return allowedSuffixes.contains { h.hasSuffix($0) }
     }
 
+    // Cookie names that must be present before we treat a Cursor login as
+    // successful. Without this check, a partial cookie write (CSRF/analytics
+    // cookies arriving before the auth cookie) would yield an empty session
+    // header that silently fails on every subsequent API call.
+    //
+    // TODO: validate against additional names observed in real login flows
+    // (Google OAuth, GitHub OAuth, WorkOS SSO, Azure AD). The current set
+    // reflects the WorkOS-issued session token used by Cursor as of the
+    // pre-public-release security review; live verification is required.
+    nonisolated static let requiredCookieNames: Set<String> = [
+        "WorkosCursorSessionToken",
+    ]
+
+    /// Returns the names of `requiredCookieNames` that are missing from
+    /// `cookies`. Pure helper for unit testing the validation rule.
+    nonisolated static func missingRequiredCookies(in cookies: [HTTPCookie]) -> Set<String> {
+        let presentNames = Set(cookies.map { $0.name })
+        return requiredCookieNames.subtracting(presentNames)
+    }
+
     func open(onComplete: @escaping (String?) -> Void) {
         self.onComplete = onComplete
         self.state = .idle
@@ -105,6 +125,19 @@ final class LoginWindow: NSObject {
                     captureAndComplete(isRetry: true)
                 } else {
                     Log.error("No cursor cookies found after retry")
+                    complete(cookieHeader: nil)
+                }
+                return
+            }
+
+            let missing = Self.missingRequiredCookies(in: cursorCookies)
+            guard missing.isEmpty else {
+                if !isRetry {
+                    Log.info("Required cookies missing: \(missing.sorted()), retrying in 1s")
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    captureAndComplete(isRetry: true)
+                } else {
+                    Log.error("Required cookies still missing after retry: \(missing.sorted())")
                     complete(cookieHeader: nil)
                 }
                 return
