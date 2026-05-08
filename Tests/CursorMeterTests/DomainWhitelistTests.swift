@@ -74,12 +74,15 @@ final class DomainWhitelistTests: XCTestCase {
     }
 
     @MainActor
-    func testSubdomainGoogle() {
-        XCTAssertTrue(LoginWindow.isAllowedHost("oauth2.google.com"))
+    func testBlocksGoogleSubdomainNotInExactSet() {
+        // Suffix `.google.com` removed — only `accounts.google.com` and
+        // `oauth2.googleapis.com` are allowed.
+        XCTAssertFalse(LoginWindow.isAllowedHost("oauth2.google.com"))
     }
 
     @MainActor
-    func testSubdomainGithub() {
+    func testExactMatchApiGithub() {
+        // api.github.com remains allowed via exactHosts.
         XCTAssertTrue(LoginWindow.isAllowedHost("api.github.com"))
     }
 
@@ -89,13 +92,54 @@ final class DomainWhitelistTests: XCTestCase {
     }
 
     @MainActor
-    func testSubdomainStripe() {
-        XCTAssertTrue(LoginWindow.isAllowedHost("api.stripe.com"))
+    func testBlocksStripeApi() {
+        // Suffix `.stripe.com` removed — only `js.stripe.com` is allowed.
+        XCTAssertFalse(LoginWindow.isAllowedHost("api.stripe.com"))
     }
 
     @MainActor
-    func testSubdomainStripeNetwork() {
-        XCTAssertTrue(LoginWindow.isAllowedHost("r.stripe.network"))
+    func testBlocksStripeNetworkSubdomain() {
+        // Suffix `.stripe.network` removed — only `m.stripe.network` is allowed.
+        XCTAssertFalse(LoginWindow.isAllowedHost("r.stripe.network"))
+    }
+
+    // MARK: - Negative Cases for Tightened Suffixes
+
+    @MainActor
+    func testBlocksEvilGoogle() {
+        XCTAssertFalse(LoginWindow.isAllowedHost("evil.google.com"))
+    }
+
+    @MainActor
+    func testBlocksSitesGoogle() {
+        XCTAssertFalse(LoginWindow.isAllowedHost("sites.google.com"))
+    }
+
+    @MainActor
+    func testBlocksEvilGithub() {
+        XCTAssertFalse(LoginWindow.isAllowedHost("evil.github.com"))
+    }
+
+    @MainActor
+    func testBlocksPagesGithub() {
+        XCTAssertFalse(LoginWindow.isAllowedHost("pages.github.com"))
+    }
+
+    @MainActor
+    func testBlocksEvilStripe() {
+        XCTAssertFalse(LoginWindow.isAllowedHost("evil.stripe.com"))
+    }
+
+    // MARK: - Case Insensitivity
+
+    @MainActor
+    func testCaseInsensitiveExactMatch() {
+        XCTAssertTrue(LoginWindow.isAllowedHost("Cursor.com"))
+    }
+
+    @MainActor
+    func testCaseInsensitiveUppercase() {
+        XCTAssertTrue(LoginWindow.isAllowedHost("ACCOUNTS.GOOGLE.COM"))
     }
 
     // MARK: - Blocked Domains
