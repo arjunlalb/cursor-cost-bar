@@ -70,6 +70,69 @@ final class NotificationManager {
         notifiedThresholds.removeAll()
     }
 
+    // MARK: - Usage Jump Notification
+
+    /// Identifier prefix used for usage-jump notification requests, kept distinct
+    /// from threshold notifications so callers/tests can disambiguate.
+    nonisolated static let usageJumpIdentifierPrefix = "usage-jump"
+
+    /// Formats the body string for a usage-jump notification. Pure function so the
+    /// exact wording can be unit-tested without invoking UNUserNotificationCenter.
+    nonisolated static func makeUsageJumpBody(displayDelta: String, currentUsage: String) -> String {
+        "Used \(displayDelta) since last refresh — possible Max mode query. Now at \(currentUsage)."
+    }
+
+    /// Surfaces a system notification when a tier-2 usage jump is detected on Bold
+    /// intensity. Callers (the JumpEffectCoordinator) are responsible for gating
+    /// on intensity == .bold && tier == .two; this method is intensity-agnostic.
+    ///
+    /// On the first call with `.notDetermined` status (user has never seen a
+    /// threshold notification yet), we prompt for authorization here so that
+    /// opting into Bold intensity actually surfaces something. If denied or
+    /// already-denied, this is a silent no-op.
+    func notifyUsageJump(displayDelta: String, currentUsage: String) async {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional:
+            break
+        case .notDetermined:
+            do {
+                let granted = try await center.requestAuthorization(options: [.alert, .sound])
+                guard granted else {
+                    Log.info("Usage jump notification skipped: user denied authorization")
+                    return
+                }
+            } catch {
+                Log.error("Usage jump notification authorization failed: \(error)")
+                return
+            }
+        default:
+            Log.info("Usage jump notification skipped: not authorized")
+            return
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Usage jumped"
+        content.body = Self.makeUsageJumpBody(
+            displayDelta: displayDelta,
+            currentUsage: currentUsage
+        )
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "\(Self.usageJumpIdentifierPrefix)-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        do {
+            try await center.add(request)
+            Log.info("Usage jump notification sent")
+        } catch {
+            Log.error("Usage jump notification failed: \(error)")
+        }
+    }
+
     private func sendNotification(title: String, body: String) async {
         let center = UNUserNotificationCenter.current()
         do {

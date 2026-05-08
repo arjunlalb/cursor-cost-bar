@@ -173,6 +173,57 @@ enum CircularProgressIcon {
         return image
     }
 
+    /// Renders an emoji glyph centered in a fixed-size NSImage suitable for
+    /// `NSStatusItem.button.image` swap. Used for the usage-jump effect.
+    ///
+    /// The returned image's `size` matches the requested `size` exactly so that
+    /// swapping it onto a pinned-length status item never shifts the slot.
+    ///
+    /// - Parameters:
+    ///   - emoji: single Unicode scalar / sequence (e.g. `"⚡"`, `"🚀"`).
+    ///   - size: target image size; should match the ring image size.
+    ///   - glow: when `true`, attaches a red drop-shadow halo behind the glyph.
+    static func makeEmojiImage(emoji: String, size: NSSize, glow: Bool = false) -> NSImage {
+        // Font sized so a typical emoji glyph fills ~78% of the image height.
+        let fontSize = size.height * 0.78
+        let font = NSFont.systemFont(ofSize: fontSize)
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+
+        var attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .paragraphStyle: paragraph,
+        ]
+
+        if glow {
+            let shadow = NSShadow()
+            shadow.shadowBlurRadius = max(2, size.height * 0.18)
+            shadow.shadowColor = NSColor.systemRed.withAlphaComponent(0.6)
+            shadow.shadowOffset = .zero
+            attrs[.shadow] = shadow
+        }
+
+        let attributed = NSAttributedString(string: emoji, attributes: attrs)
+        let textSize = attributed.size()
+
+        let image = NSImage(size: size, flipped: false) { rect in
+            // Slight inset keeps any drop-shadow halo within image bounds.
+            let inset: CGFloat = glow ? max(1, rect.height * 0.08) : 0
+            let drawRect = rect.insetBy(dx: inset, dy: inset)
+
+            // Center the glyph: NSAttributedString.draw uses the typographic
+            // bounding box, so subtract the measured size from the available
+            // box to obtain origin for visual centering.
+            let originX = drawRect.minX + (drawRect.width - textSize.width) / 2
+            let originY = drawRect.minY + (drawRect.height - textSize.height) / 2
+            attributed.draw(at: NSPoint(x: originX, y: originY))
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
+
     // MARK: - Private
 
     private static func pieColor(for percent: Double) -> NSColor {
