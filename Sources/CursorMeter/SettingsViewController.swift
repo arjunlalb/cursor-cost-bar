@@ -300,7 +300,7 @@ final class SettingsViewController: NSViewController {
     // MARK: - Actions
 
     @objc private func openGitHub() {
-        NSWorkspace.shared.open(URL(string: "https://github.com/WoojinAhn/CursorMeter")!)
+        ExternalURL.openGitHub(URL(string: "https://github.com/WoojinAhn/CursorMeter")!)
     }
 
     @objc private func intervalChanged() {
@@ -375,7 +375,7 @@ final class SettingsViewController: NSViewController {
         guard let update = viewModel.availableUpdate,
               let url = URL(string: update.htmlURL)
         else { return }
-        NSWorkspace.shared.open(url)
+        ExternalURL.openGitHub(url)
     }
 
     // MARK: - Helpers: UI Factory
