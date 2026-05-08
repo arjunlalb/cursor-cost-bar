@@ -65,13 +65,13 @@ final class JumpEffectCoordinatorTests: XCTestCase {
         let params = JumpEffectCoordinator.swapParams(for: .one)
         XCTAssertEqual(params.emoji, "⚡")
         XCTAssertFalse(params.glow)
-        XCTAssertEqual(params.durationMs, 1500)
+        XCTAssertEqual(params.durationMs, 6000)
     }
 
     func testSwapParamsTierTwoUsesRocketWithGlow() {
         let params = JumpEffectCoordinator.swapParams(for: .two)
         XCTAssertEqual(params.emoji, "🚀")
         XCTAssertTrue(params.glow)
-        XCTAssertEqual(params.durationMs, 3000)
+        XCTAssertEqual(params.durationMs, 15000)
     }
 }
