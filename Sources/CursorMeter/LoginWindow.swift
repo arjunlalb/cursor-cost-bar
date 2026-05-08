@@ -141,6 +141,24 @@ extension LoginWindow: WKNavigationDelegate {
         }
     }
 
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void
+    ) {
+        // Defense-in-depth: WKWebView re-triggers navigationAction for each
+        // redirect step today, but the contract is not stable. Validate the
+        // response host as well so a 302 that bypasses the action delegate
+        // cannot deliver content.
+        guard let host = navigationResponse.response.url?.host,
+              Self.isAllowedHost(host) else {
+            Log.info("Blocked response from: \(navigationResponse.response.url?.host ?? "nil")")
+            decisionHandler(.cancel)
+            return
+        }
+        decisionHandler(.allow)
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard let url = webView.url else { return }
         let urlString = url.absoluteString
