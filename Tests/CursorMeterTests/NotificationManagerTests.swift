@@ -134,4 +134,48 @@ final class NotificationManagerTests: XCTestCase {
         manager.resetNotifications()
         XCTAssertTrue(manager.notifiedThresholds.isEmpty)
     }
+
+    // MARK: - Usage Jump Notification
+
+    func testUsageJumpBodyFormatIncludesDeltaAndCurrent() {
+        let body = NotificationManager.makeUsageJumpBody(
+            displayDelta: "+$0.30",
+            currentUsage: "$2.10"
+        )
+        XCTAssertTrue(body.contains("+$0.30"))
+        XCTAssertTrue(body.contains("$2.10"))
+        XCTAssertTrue(body.contains("Max mode"))
+    }
+
+    func testUsageJumpBodyFormatExactWording() {
+        let body = NotificationManager.makeUsageJumpBody(
+            displayDelta: "+30 / 50",
+            currentUsage: "45 / 50"
+        )
+        XCTAssertEqual(
+            body,
+            "Used +30 / 50 since last refresh — possible Max mode query. Now at 45 / 50."
+        )
+    }
+
+    func testUsageJumpBodyHandlesPercentDelta() {
+        let body = NotificationManager.makeUsageJumpBody(
+            displayDelta: "+15.0%",
+            currentUsage: "78.0%"
+        )
+        XCTAssertTrue(body.contains("+15.0%"))
+        XCTAssertTrue(body.contains("78.0%"))
+    }
+
+    func testUsageJumpIdentifierPrefixIsDistinct() {
+        // Sanity check: the prefix used for jump notifications must not collide
+        // with any of the integer threshold values used by checkAndNotify.
+        XCTAssertEqual(NotificationManager.usageJumpIdentifierPrefix, "usage-jump")
+    }
+
+    // Note: a runtime test for `notifyUsageJump` is intentionally omitted —
+    // `UNUserNotificationCenter.current()` aborts when invoked outside an
+    // app bundle (the swift-test host has no bundle identifier). The body and
+    // identifier-prefix tests above exercise the user-visible contract; the
+    // remaining authorization/dispatch path is covered by manual smoke testing.
 }
