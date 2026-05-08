@@ -28,15 +28,21 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Build app bundle
-        run: APP_VERSION=${{ steps.version.outputs.version }} bash Scripts/package_app.sh
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: bash Scripts/package_app.sh
 
       - name: Create zip
-        run: ditto -c -k --keepParent CursorMeter.app CursorMeter-${{ steps.version.outputs.version }}.zip
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: ditto -c -k --keepParent CursorMeter.app "CursorMeter-${APP_VERSION}.zip"
 
       - name: Generate release notes
         id: notes
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${APP_VERSION}"
           PREV_TAG=$(git tag --sort=-v:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
 
           if [ -n "$PREV_TAG" ]; then
