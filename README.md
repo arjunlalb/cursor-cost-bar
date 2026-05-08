@@ -22,8 +22,9 @@ Unlike in-editor extensions, CursorMeter runs independently as a native macOS ap
 - Gauge ring icon in menu bar with color thresholds (green → yellow → red)
 - View billing usage, per-model request counts, and reset date from the menu bar
 - macOS notifications when usage reaches customizable thresholds (default: 65%/90%)
+- **Usage-jump effect** — menu bar icon flashes ⚡ on a moderate jump and 🚀 on a Max-mode-sized jump, so a sudden spike is hard to miss. Three intensity levels (Quiet / Normal / Bold); Bold also raises a macOS notification on tier-2 jumps.
 - Menu bar display mode toggle: fraction (used/limit) or percentage (%)
-- Settings UI (refresh interval, notification thresholds, menu bar display format)
+- Settings UI (refresh interval, notification thresholds, menu bar display format, jump-effect intensity)
 - Launch at login support
 - In-app update checker
 - In-app WebView login (Google, GitHub, Enterprise SSO)
@@ -34,10 +35,13 @@ Unlike in-editor extensions, CursorMeter runs independently as a native macOS ap
 ## Security
 
 - Zero external dependencies (macOS SDK only)
-- WebView domain whitelist enforced
+- Two-tier WebView host whitelist (exact + suffix), validated on both navigation action and response
+- Required-cookie validation before persisting a login session
+- Host-validated `NSWorkspace.open` for any URL derived from the GitHub Releases API
 - `URLSessionConfiguration.ephemeral` (no disk cache)
-- No JavaScript injection
 - Keychain-based credential storage
+
+See [`SECURITY.md`](SECURITY.md) for the full threat model and reporting policy.
 
 ## Requirements
 
