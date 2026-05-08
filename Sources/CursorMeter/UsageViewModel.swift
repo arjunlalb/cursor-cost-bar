@@ -410,7 +410,8 @@ final class UsageViewModel {
     }
 
     /// Builds a `JumpEvent` from raw delta/limit. Pure function — exposed for testing.
-    /// `limit ≤ 0` triggers fixed-threshold fallback (5/15 cents, 1/5 requests, 5/15 %p).
+    /// Classification is the OR of percent-of-limit (5/15%) and per-mode absolute
+    /// thresholds; `limit ≤ 0` falls back to absolute-only.
     nonisolated static func makeJumpEvent(
         mode: JumpEvent.Mode,
         delta: Double,
@@ -429,8 +430,23 @@ final class UsageViewModel {
         )
     }
 
-    /// Tier classification. Uses % of plan limit when limit > 0; otherwise falls back
-    /// to fixed canonical thresholds per mode.
+    /// Per-mode absolute thresholds in canonical units. A delta meeting either the
+    /// percent-of-limit or the absolute threshold is enough to escalate a tier.
+    /// Rationale: a single Max-mode query is roughly +0.30 USD or +15 requests
+    /// regardless of plan size, so absolute thresholds keep large-plan users from
+    /// silently missing those jumps.
+    private nonisolated static func absoluteThresholds(
+        for mode: JumpEvent.Mode
+    ) -> (t1: Double, t2: Double) {
+        switch mode {
+        case .credit:  return (5, 30)   // cents — $0.05 / $0.30
+        case .request: return (5, 15)   // request count
+        case .percent: return (5, 15)   // %-points (mirrors percent-of-limit)
+        }
+    }
+
+    /// Tier classification. Tier is the OR of percent-of-limit (5/15%) and per-mode
+    /// absolute thresholds. When `limit ≤ 0` only the absolute thresholds apply.
     nonisolated static func classifyTier(
         mode: JumpEvent.Mode,
         delta: Double,
@@ -438,29 +454,19 @@ final class UsageViewModel {
     ) -> JumpEvent.Tier {
         guard delta > 0 else { return .zero }
 
+        let (t1Abs, t2Abs) = absoluteThresholds(for: mode)
+
         if limit > 0 {
             let pct = delta / limit * 100.0
-            if pct >= 15 { return .two }
-            if pct >= 5 { return .one }
+            if pct >= 15 || delta >= t2Abs { return .two }
+            if pct >= 5  || delta >= t1Abs { return .one }
             return .zero
         }
 
-        // Fallback when plan_limit ≤ 0 (unlimited / unknown).
-        switch mode {
-        case .credit:
-            if delta >= 15 { return .two }
-            if delta >= 5 { return .one }
-            return .zero
-        case .request:
-            if delta >= 5 { return .two }
-            if delta >= 1 { return .one }
-            return .zero
-        case .percent:
-            // Percent mode has an implicit limit of 100, but keep this branch for safety.
-            if delta >= 15 { return .two }
-            if delta >= 5 { return .one }
-            return .zero
-        }
+        // Fallback when plan_limit ≤ 0 (unlimited / unknown) — absolute only.
+        if delta >= t2Abs { return .two }
+        if delta >= t1Abs { return .one }
+        return .zero
     }
 
     /// Formats a positive delta as a signed user-facing string for the active display mode.

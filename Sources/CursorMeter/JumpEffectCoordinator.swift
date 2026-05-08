@@ -144,10 +144,13 @@ final class JumpEffectCoordinator {
     nonisolated static func swapParams(
         for tier: JumpEvent.Tier
     ) -> (emoji: String, glow: Bool, durationMs: Int) {
+        // Durations chosen so a user not staring at the menu bar still has a
+        // reasonable chance of catching the cue: 0.5–0.9 s in the original spec
+        // was reliably missed during 1-minute refresh ticks.
         switch tier {
         case .zero: return ("", false, 0)
-        case .one:  return ("⚡", false, 500)
-        case .two:  return ("🚀", true, 900)
+        case .one:  return ("⚡", false, 1500)
+        case .two:  return ("🚀", true, 3000)
         }
     }
 }

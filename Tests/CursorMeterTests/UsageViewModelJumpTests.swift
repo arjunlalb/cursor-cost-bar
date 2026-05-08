@@ -6,22 +6,23 @@ import XCTest
 /// canonical-unit math used by `UsageViewModel.refresh()`.
 final class UsageViewModelJumpTests: XCTestCase {
 
-    // MARK: - Tier classification (with limit > 0)
+    // MARK: - Tier classification (with limit > 0, kept under absolute thresholds)
 
-    func testTierZeroJustBelow5Percent() {
-        // 4.9% of 1000 cents = 49 cents
-        let tier = UsageViewModel.classifyTier(mode: .credit, delta: 49, limit: 1000)
+    func testTierZeroJustBelow5PercentAndAbsT1() {
+        // 0.4% of 1000 cents = 4 cents (< 5% pct, < 5 cents T1)
+        let tier = UsageViewModel.classifyTier(mode: .credit, delta: 4, limit: 1000)
         XCTAssertEqual(tier, .zero)
     }
 
-    func testTierOneAt5PercentBoundary() {
-        let tier = UsageViewModel.classifyTier(mode: .credit, delta: 50, limit: 1000)
+    func testTierOneAt5PercentBoundaryUnderAbsT2() {
+        // 5% of 500 cents = 25 cents (≥ 5% pct, ≥ 5 cents T1, < 30 cents T2)
+        let tier = UsageViewModel.classifyTier(mode: .credit, delta: 25, limit: 500)
         XCTAssertEqual(tier, .one)
     }
 
-    func testTierOneJustBelow15Percent() {
-        // 14.9% of 1000 cents = 149 cents
-        let tier = UsageViewModel.classifyTier(mode: .credit, delta: 149, limit: 1000)
+    func testTierOneJustBelow15PercentAndAbsT2() {
+        // 12.5% of 200 cents = 25 cents (< 15% pct, < 30 cents T2)
+        let tier = UsageViewModel.classifyTier(mode: .credit, delta: 25, limit: 200)
         XCTAssertEqual(tier, .one)
     }
 
@@ -41,22 +42,50 @@ final class UsageViewModelJumpTests: XCTestCase {
         XCTAssertEqual(tier, .zero)
     }
 
+    // MARK: - Absolute thresholds escalate even when percent is tiny
+
+    func testRequestAbsoluteEscalatesOnLargePlan() {
+        // 27 / 500 = 5.4% → would be tier 1 by percent, but 27 ≥ T2 (15) escalates to tier 2.
+        // This is the user-observed "Max-mode +27 on a 500-limit plan" case.
+        let tier = UsageViewModel.classifyTier(mode: .request, delta: 27, limit: 500)
+        XCTAssertEqual(tier, .two)
+    }
+
+    func testRequestAbsoluteEscalatesOnEnterprisePlan() {
+        // 27 / 5000 = 0.54% → tier 0 by percent, but 27 ≥ T2 (15) → tier 2.
+        let tier = UsageViewModel.classifyTier(mode: .request, delta: 27, limit: 5000)
+        XCTAssertEqual(tier, .two)
+    }
+
+    func testCreditAbsoluteEscalatesOnLargePlan() {
+        // $0.30 (= 30 cents) on a $50 plan: 0.6% by percent, but 30 ≥ T2 cents → tier 2.
+        // This is roughly a single Max-mode query.
+        let tier = UsageViewModel.classifyTier(mode: .credit, delta: 30, limit: 5000)
+        XCTAssertEqual(tier, .two)
+    }
+
+    func testCreditAbsoluteEscalatesToTierOne() {
+        // 5 cents on a $50 plan: 0.1% by percent, but 5 ≥ T1 cents → tier 1.
+        let tier = UsageViewModel.classifyTier(mode: .credit, delta: 5, limit: 5000)
+        XCTAssertEqual(tier, .one)
+    }
+
     // MARK: - Fixed-threshold fallback (limit ≤ 0)
 
     func testCreditFallbackTierBoundaries() {
-        // limit ≤ 0 → cents-based fixed thresholds: 5 / 15
+        // limit ≤ 0 → absolute-only thresholds: T1=5, T2=30 cents
         XCTAssertEqual(UsageViewModel.classifyTier(mode: .credit, delta: 4, limit: 0), .zero)
         XCTAssertEqual(UsageViewModel.classifyTier(mode: .credit, delta: 5, limit: 0), .one)
-        XCTAssertEqual(UsageViewModel.classifyTier(mode: .credit, delta: 14, limit: 0), .one)
-        XCTAssertEqual(UsageViewModel.classifyTier(mode: .credit, delta: 15, limit: 0), .two)
+        XCTAssertEqual(UsageViewModel.classifyTier(mode: .credit, delta: 29, limit: 0), .one)
+        XCTAssertEqual(UsageViewModel.classifyTier(mode: .credit, delta: 30, limit: 0), .two)
     }
 
     func testRequestFallbackTierBoundaries() {
-        // limit ≤ 0 → request-based fixed thresholds: 1 / 5
-        XCTAssertEqual(UsageViewModel.classifyTier(mode: .request, delta: 0.9, limit: 0), .zero)
-        XCTAssertEqual(UsageViewModel.classifyTier(mode: .request, delta: 1, limit: 0), .one)
-        XCTAssertEqual(UsageViewModel.classifyTier(mode: .request, delta: 4, limit: 0), .one)
-        XCTAssertEqual(UsageViewModel.classifyTier(mode: .request, delta: 5, limit: 0), .two)
+        // limit ≤ 0 → absolute-only thresholds: T1=5, T2=15 requests
+        XCTAssertEqual(UsageViewModel.classifyTier(mode: .request, delta: 4, limit: 0), .zero)
+        XCTAssertEqual(UsageViewModel.classifyTier(mode: .request, delta: 5, limit: 0), .one)
+        XCTAssertEqual(UsageViewModel.classifyTier(mode: .request, delta: 14, limit: 0), .one)
+        XCTAssertEqual(UsageViewModel.classifyTier(mode: .request, delta: 15, limit: 0), .two)
     }
 
     // MARK: - Percent-only mode (5%p / 15%p)
@@ -105,9 +134,10 @@ final class UsageViewModelJumpTests: XCTestCase {
 
     func testMakeJumpEventDeltaPctWithZeroLimitIsZero() {
         // No meaningful percent when limit is 0 — avoids divide-by-zero noise in UI.
+        // Tier comes from the absolute-only fallback: 10 ∈ [T1=5, T2=15) → tier 1.
         let event = UsageViewModel.makeJumpEvent(mode: .request, delta: 10, limit: 0)
         XCTAssertEqual(event.deltaPct, 0)
-        XCTAssertEqual(event.tier, .two)  // fallback: 10 ≥ 5 requests
+        XCTAssertEqual(event.tier, .one)
     }
 
     // MARK: - Settings persistence + setters
