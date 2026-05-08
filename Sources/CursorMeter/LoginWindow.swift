@@ -74,10 +74,10 @@ final class LoginWindow: NSObject {
     // cookies arriving before the auth cookie) would yield an empty session
     // header that silently fails on every subsequent API call.
     //
-    // TODO: validate against additional names observed in real login flows
-    // (Google OAuth, GitHub OAuth, WorkOS SSO, Azure AD). The current set
-    // reflects the WorkOS-issued session token used by Cursor as of the
-    // pre-public-release security review; live verification is required.
+    // `WorkosCursorSessionToken` confirmed via live Google OAuth login.
+    // Other login paths (GitHub OAuth, WorkOS SSO, Azure AD) have not been
+    // exercised end-to-end; if a path surfaces a different auth cookie name,
+    // expand this set rather than weakening it.
     nonisolated static let requiredCookieNames: Set<String> = [
         "WorkosCursorSessionToken",
     ]
@@ -142,10 +142,6 @@ final class LoginWindow: NSObject {
             let cursorCookies = cookies.filter {
                 $0.domain.contains("cursor.com") || $0.domain.contains("cursor.sh")
             }
-
-            // VERIFICATION-ONLY (remove before commit): log captured cookie names
-            // to validate `requiredCookieNames` against real Cursor login flow.
-            Log.info("Verification: captured cookie names = \(cursorCookies.map(\.name).sorted())")
 
             guard !cursorCookies.isEmpty else {
                 if !isRetry {
