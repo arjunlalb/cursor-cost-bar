@@ -86,15 +86,28 @@ final class NotificationManager {
     /// intensity. Callers (the JumpEffectCoordinator) are responsible for gating
     /// on intensity == .bold && tier == .two; this method is intensity-agnostic.
     ///
-    /// Authorization is *not* requested here — the threshold notification flow
-    /// already prompts the user. If authorization has been denied or not yet
-    /// determined, this is a silent no-op.
+    /// On the first call with `.notDetermined` status (user has never seen a
+    /// threshold notification yet), we prompt for authorization here so that
+    /// opting into Bold intensity actually surfaces something. If denied or
+    /// already-denied, this is a silent no-op.
     func notifyUsageJump(displayDelta: String, currentUsage: String) async {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
-        guard settings.authorizationStatus == .authorized
-            || settings.authorizationStatus == .provisional
-        else {
+        switch settings.authorizationStatus {
+        case .authorized, .provisional:
+            break
+        case .notDetermined:
+            do {
+                let granted = try await center.requestAuthorization(options: [.alert, .sound])
+                guard granted else {
+                    Log.info("Usage jump notification skipped: user denied authorization")
+                    return
+                }
+            } catch {
+                Log.error("Usage jump notification authorization failed: \(error)")
+                return
+            }
+        default:
             Log.info("Usage jump notification skipped: not authorized")
             return
         }
