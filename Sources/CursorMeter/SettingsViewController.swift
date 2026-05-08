@@ -20,6 +20,9 @@ final class SettingsViewController: NSViewController {
     private var criticalValueLabel = NSTextField()
     private var criticalSlider = NSSlider()
     private var menuBarDisplayPopUp = NSPopUpButton()
+    private var jumpEffectToggle = NSButton()
+    private var jumpIntensitySegmented = NSSegmentedControl()
+    private var jumpIntensityRow = NSView()
     private var launchAtLoginToggle = NSButton()
 
     // Updates row controls
@@ -84,6 +87,15 @@ final class SettingsViewController: NSViewController {
         outerStack.addArrangedSubview(makeSeparator())
         outerStack.setCustomSpacing(10, after: outerStack.arrangedSubviews.last!)
 
+        // Section: Usage Jump
+        outerStack.addArrangedSubview(makeSectionHeader("Usage Jump"))
+        outerStack.setCustomSpacing(6, after: outerStack.arrangedSubviews.last!)
+        outerStack.addArrangedSubview(makeJumpEffectSection())
+        outerStack.setCustomSpacing(10, after: outerStack.arrangedSubviews.last!)
+
+        outerStack.addArrangedSubview(makeSeparator())
+        outerStack.setCustomSpacing(10, after: outerStack.arrangedSubviews.last!)
+
         // Section: General
         outerStack.addArrangedSubview(makeSectionHeader("General"))
         outerStack.setCustomSpacing(6, after: outerStack.arrangedSubviews.last!)
@@ -138,6 +150,11 @@ final class SettingsViewController: NSViewController {
             menuBarDisplayPopUp.selectItem(at: viewModel.menuBarDisplayMode)
             menuBarDisplayPopUp.item(at: 1)?.isEnabled = true
         }
+
+        // Jump effect
+        jumpEffectToggle.state = viewModel.jumpEffectEnabled ? .on : .off
+        jumpIntensitySegmented.selectedSegment = viewModel.jumpIntensity.rawValue
+        jumpIntensityRow.isHidden = !viewModel.jumpEffectEnabled
 
         // Launch at login
         launchAtLoginToggle.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -222,6 +239,39 @@ final class SettingsViewController: NSViewController {
         label.textColor = .labelColor
 
         let stack = NSStackView(views: [label, menuBarDisplayPopUp])
+        stack.orientation = .vertical
+        stack.alignment = .left
+        stack.spacing = 6
+        return stack
+    }
+
+    private func makeJumpEffectSection() -> NSView {
+        jumpEffectToggle = makeCheckbox(
+            title: "Visual jump effect",
+            action: #selector(jumpEffectToggleChanged)
+        )
+
+        jumpIntensitySegmented = NSSegmentedControl(
+            labels: ["Quiet", "Normal", "Bold"],
+            trackingMode: .selectOne,
+            target: self,
+            action: #selector(jumpIntensityChanged)
+        )
+        jumpIntensitySegmented.selectedSegment = viewModel.jumpIntensity.rawValue
+        jumpIntensitySegmented.translatesAutoresizingMaskIntoConstraints = false
+
+        let intensityLabel = makeLabel("Intensity")
+        let intensityRow = NSStackView(views: [intensityLabel, jumpIntensitySegmented, makeSpacer()])
+        intensityRow.orientation = .horizontal
+        intensityRow.spacing = 8
+        intensityRow.alignment = .centerY
+        jumpIntensityRow = intensityRow
+
+        let description = makeLabel("Highlight sudden usage jumps in the menu bar.")
+        description.textColor = .secondaryLabelColor
+        description.font = NSFont.systemFont(ofSize: 11)
+
+        let stack = NSStackView(views: [jumpEffectToggle, jumpIntensityRow, description])
         stack.orientation = .vertical
         stack.alignment = .left
         stack.spacing = 6
@@ -340,6 +390,21 @@ final class SettingsViewController: NSViewController {
 
     @objc private func menuBarDisplayModeChanged() {
         viewModel.setMenuBarDisplayMode(menuBarDisplayPopUp.indexOfSelectedItem)
+    }
+
+    @objc private func jumpEffectToggleChanged() {
+        let enabled = jumpEffectToggle.state == .on
+        viewModel.setJumpEffectEnabled(enabled)
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.2
+            jumpIntensityRow.animator().isHidden = !enabled
+        }
+    }
+
+    @objc private func jumpIntensityChanged() {
+        let raw = jumpIntensitySegmented.selectedSegment
+        guard let intensity = JumpIntensity(rawValue: raw) else { return }
+        viewModel.setJumpIntensity(intensity)
     }
 
     @objc private func launchAtLoginChanged() {
