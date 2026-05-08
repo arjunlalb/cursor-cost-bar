@@ -4,12 +4,16 @@ import OSLog
 private let logger = Logger(subsystem: "com.cursormeter", category: "general")
 
 enum Log {
+    // Redacted output is the security boundary, so the resulting string is safe
+    // to surface in Console.app and `log collect` archives. Mark as `.public`
+    // explicitly — Swift string interpolation defaults dynamic content to
+    // `<private>`, which would hide already-scrubbed messages from operators.
     static func info(_ message: String) {
-        logger.info("\(LogRedactor.redact(message))")
+        logger.info("\(LogRedactor.redact(message), privacy: .public)")
     }
 
     static func error(_ message: String) {
-        logger.error("\(LogRedactor.redact(message))")
+        logger.error("\(LogRedactor.redact(message), privacy: .public)")
     }
 }
 
