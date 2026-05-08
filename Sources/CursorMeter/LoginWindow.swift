@@ -17,8 +17,33 @@ final class LoginWindow: NSObject {
         // Cursor primary
         "cursor.com", "www.cursor.com",
         "authenticator.cursor.sh", "authenticate.cursor.sh",
-        // Google OAuth
+        // Google OAuth — canonical
         "accounts.google.com", "oauth2.googleapis.com",
+        // Google OAuth — ccTLD locale redirects (top ~50 markets).
+        // Google routes some users through accounts.google.<ccTLD> before
+        // landing on accounts.google.com. Without these entries, those
+        // navigations are blocked, forcing Google's fallback path and adding
+        // user-visible login friction. Reactively expand if a user reports a
+        // missing country. Background: Google began phasing out ccTLDs in
+        // 2025-04 in favor of unified .com routing, so this list is expected
+        // to shrink in relevance over time.
+        "accounts.google.co.uk", "accounts.google.de", "accounts.google.fr",
+        "accounts.google.co.jp", "accounts.google.co.kr", "accounts.google.com.br",
+        "accounts.google.co.in", "accounts.google.com.au", "accounts.google.com.mx",
+        "accounts.google.it", "accounts.google.es", "accounts.google.ca",
+        "accounts.google.nl", "accounts.google.ru", "accounts.google.cn",
+        "accounts.google.com.tr", "accounts.google.pl", "accounts.google.co.id",
+        "accounts.google.com.sg", "accounts.google.co.il", "accounts.google.se",
+        "accounts.google.ch", "accounts.google.com.tw", "accounts.google.com.vn",
+        "accounts.google.com.ar", "accounts.google.be", "accounts.google.at",
+        "accounts.google.no", "accounts.google.dk", "accounts.google.fi",
+        "accounts.google.ie", "accounts.google.cz", "accounts.google.gr",
+        "accounts.google.pt", "accounts.google.com.hk", "accounts.google.co.th",
+        "accounts.google.com.my", "accounts.google.com.ph", "accounts.google.co.za",
+        "accounts.google.ae", "accounts.google.com.sa", "accounts.google.com.pk",
+        "accounts.google.ro", "accounts.google.hu", "accounts.google.com.ua",
+        "accounts.google.cl", "accounts.google.com.co", "accounts.google.co.nz",
+        "accounts.google.com.eg", "accounts.google.com.ng",
         // GitHub OAuth
         "github.com", "api.github.com",
         // Stripe (Cursor dashboard payment widgets)
@@ -117,6 +142,10 @@ final class LoginWindow: NSObject {
             let cursorCookies = cookies.filter {
                 $0.domain.contains("cursor.com") || $0.domain.contains("cursor.sh")
             }
+
+            // VERIFICATION-ONLY (remove before commit): log captured cookie names
+            // to validate `requiredCookieNames` against real Cursor login flow.
+            Log.info("Verification: captured cookie names = \(cursorCookies.map(\.name).sorted())")
 
             guard !cursorCookies.isEmpty else {
                 if !isRetry {

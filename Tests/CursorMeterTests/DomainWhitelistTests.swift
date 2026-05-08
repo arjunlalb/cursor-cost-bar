@@ -36,6 +36,27 @@ final class DomainWhitelistTests: XCTestCase {
     }
 
     @MainActor
+    func testExactMatchAccountsGoogleCcTLDs() {
+        // Sample of the ~50 ccTLD locale redirects Google routes through
+        // before landing on accounts.google.com. These must not be blocked.
+        XCTAssertTrue(LoginWindow.isAllowedHost("accounts.google.co.kr"))
+        XCTAssertTrue(LoginWindow.isAllowedHost("accounts.google.de"))
+        XCTAssertTrue(LoginWindow.isAllowedHost("accounts.google.com.br"))
+        XCTAssertTrue(LoginWindow.isAllowedHost("accounts.google.co.jp"))
+        XCTAssertTrue(LoginWindow.isAllowedHost("accounts.google.co.uk"))
+    }
+
+    @MainActor
+    func testBlocksNonAccountsGoogleCcTLD() {
+        // Only accounts.* under each ccTLD is allowed; sites/mail/etc. are not.
+        XCTAssertFalse(LoginWindow.isAllowedHost("sites.google.co.kr"))
+        XCTAssertFalse(LoginWindow.isAllowedHost("mail.google.de"))
+        XCTAssertFalse(LoginWindow.isAllowedHost("evil.google.co.kr"))
+        // Unlisted ccTLDs remain blocked (reactive expansion policy).
+        XCTAssertFalse(LoginWindow.isAllowedHost("accounts.google.li"))
+    }
+
+    @MainActor
     func testExactMatchGithub() {
         XCTAssertTrue(LoginWindow.isAllowedHost("github.com"))
     }
