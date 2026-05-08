@@ -563,7 +563,7 @@ final class MenuBarPopoverViewController: NSViewController {
 
     @objc private func openUpdateURL() {
         guard let url = updateURL else { return }
-        NSWorkspace.shared.open(url)
+        ExternalURL.openGitHub(url)
     }
 }
 
