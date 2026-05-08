@@ -133,7 +133,11 @@ final class UsageViewModel {
         } catch APIError.unauthorized {
             Log.info("Session expired, clearing keychain")
             cachedCookieHeader = nil
-            try? KeychainStore.deleteCookieHeader()
+            do {
+                try KeychainStore.deleteCookieHeader()
+            } catch {
+                Log.error("Keychain delete failed: \(error.localizedDescription)")
+            }
             authState = .loginRequired
             usageData = nil
             stopAutoRefresh()
@@ -147,10 +151,10 @@ final class UsageViewModel {
                     errorMessage = "Waiting for network..."
                     scheduleNetworkRetry()
                 } else {
-                    errorMessage = error.localizedDescription
+                    errorMessage = Self.fallbackErrorMessage(for: error)
                 }
             }
-            Log.error("Refresh failed: \(error)")
+            Log.error("Refresh failed: \(error.localizedDescription)")
         }
 
         isLoading = false
@@ -159,7 +163,11 @@ final class UsageViewModel {
 
     func logout() {
         cachedCookieHeader = nil
-        try? KeychainStore.deleteCookieHeader()
+        do {
+            try KeychainStore.deleteCookieHeader()
+        } catch {
+            Log.error("Keychain delete failed: \(error.localizedDescription)")
+        }
         authState = .loggedOut
         usageData = nil
         errorMessage = nil
@@ -240,6 +248,28 @@ final class UsageViewModel {
                 menuBarDisplayMode = 1
             }
         }
+    }
+
+    /// Maps an error to a user-facing message for the fallback (non-network-down, non-auth) error path.
+    /// Avoid surfacing raw `localizedDescription` to UI: it can leak request URLs or other diagnostic
+    /// detail picked up by crash reporters that auto-capture user-visible state.
+    nonisolated static func fallbackErrorMessage(for error: Error) -> String {
+        if let urlError = error as? URLError {
+            return urlError.code == .timedOut ? "Request timed out" : "Network error"
+        }
+        if error is DecodingError {
+            return "Failed to read usage data"
+        }
+        if case APIError.httpError(let code) = error {
+            return "Server error (\(code))"
+        }
+        if case APIError.networkError(let underlying) = error {
+            if let urlError = underlying as? URLError {
+                return urlError.code == .timedOut ? "Request timed out" : "Network error"
+            }
+            return "Network error"
+        }
+        return "Unexpected error"
     }
 
     private var networkRetryTask: Task<Void, Never>?

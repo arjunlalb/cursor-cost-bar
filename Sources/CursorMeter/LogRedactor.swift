@@ -4,12 +4,16 @@ import OSLog
 private let logger = Logger(subsystem: "com.cursormeter", category: "general")
 
 enum Log {
+    // Redacted output is the security boundary, so the resulting string is safe
+    // to surface in Console.app and `log collect` archives. Mark as `.public`
+    // explicitly — Swift string interpolation defaults dynamic content to
+    // `<private>`, which would hide already-scrubbed messages from operators.
     static func info(_ message: String) {
-        logger.info("\(LogRedactor.redact(message))")
+        logger.info("\(LogRedactor.redact(message), privacy: .public)")
     }
 
     static func error(_ message: String) {
-        logger.error("\(LogRedactor.redact(message))")
+        logger.error("\(LogRedactor.redact(message), privacy: .public)")
     }
 }
 
@@ -23,6 +27,13 @@ enum LogRedactor {
         pattern: #"(?i)(authorization\s*:\s*)([^\r\n]+)"#)
     private static let bearerRegex = try! NSRegularExpression(
         pattern: #"(?i)\bbearer\s+[a-z0-9+/._\-]+=*"#)
+    // JWT: three base64url segments separated by dots, prefixed with `eyJ`.
+    private static let jwtRegex = try! NSRegularExpression(
+        pattern: #"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"#)
+    // Generic key=value tokens (cookies, query params, body fields) carrying credentials.
+    // Captures the key so it stays visible while the value is redacted.
+    private static let tokenAssignmentRegex = try! NSRegularExpression(
+        pattern: #"(?i)\b((?:[A-Za-z0-9_-]*(?:session-token|cookie|auth|token))=)([^;\s&]+)"#)
 
     static func redact(_ text: String) -> String {
         var output = text
@@ -30,6 +41,8 @@ enum LogRedactor {
         output = replace(cookieRegex, in: output, with: "$1<redacted>")
         output = replace(authRegex, in: output, with: "$1<redacted>")
         output = replace(bearerRegex, in: output, with: "Bearer <redacted>")
+        output = replace(jwtRegex, in: output, with: "<redacted-jwt>")
+        output = replace(tokenAssignmentRegex, in: output, with: "$1<redacted>")
         return output
     }
 
