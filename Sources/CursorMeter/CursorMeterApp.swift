@@ -14,6 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var loginWindow: LoginWindow?
     private var eventMonitor: Any?
+    private var jumpCoordinator: JumpEffectCoordinator?
+    private let notificationManager = NotificationManager()
 
     // MARK: - NSApplicationDelegate Entry Point
 
@@ -32,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
         setupPopover()
         setupKeyboardShortcut()
+        setupJumpCoordinator()
 
         viewModel.checkExistingSession()
         observeViewModel()
@@ -42,6 +45,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSEvent.removeMonitor(monitor)
             eventMonitor = nil
         }
+        jumpCoordinator?.stop()
+        jumpCoordinator = nil
     }
 
     // MARK: - Status Item
@@ -59,25 +64,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatusItem() {
-        guard let button = statusItem?.button else { return }
+        statusItem?.button?.image = currentRingImage()
+    }
 
-        if let data = viewModel.usageData {
-            let mode = data.isPercentOnly ? 2 : viewModel.menuBarDisplayMode
-            if mode == 2 {
-                button.image = CircularProgressIcon.menuBarImageWithPercent(
-                    percent: data.percentUsed
-                )
-            } else if mode == 1 {
-                button.image = CircularProgressIcon.menuBarImageWithText(
-                    percent: data.percentUsed,
-                    usedText: data.menuBarUsedText,
-                    limitText: data.menuBarLimitText
-                )
-            } else {
-                button.image = CircularProgressIcon.menuBarImage(percent: data.percentUsed)
-            }
-        } else {
-            button.image = CircularProgressIcon.idleImage()
+    /// Builds the ring/idle image that should currently occupy the menu bar slot,
+    /// based on the latest `UsageDisplayData` and the user's display-mode setting.
+    /// Pure read of view-model state — no side effects. Reused by the
+    /// `JumpEffectCoordinator` to restore the slot after an emoji swap.
+    private func currentRingImage() -> NSImage {
+        guard let data = viewModel.usageData else {
+            return CircularProgressIcon.idleImage()
+        }
+        let mode = data.isPercentOnly ? 2 : viewModel.menuBarDisplayMode
+        switch mode {
+        case 2:
+            return CircularProgressIcon.menuBarImageWithPercent(percent: data.percentUsed)
+        case 1:
+            return CircularProgressIcon.menuBarImageWithText(
+                percent: data.percentUsed,
+                usedText: data.menuBarUsedText,
+                limitText: data.menuBarLimitText
+            )
+        default:
+            return CircularProgressIcon.menuBarImage(percent: data.percentUsed)
         }
     }
 
@@ -163,6 +172,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return event
         }
+    }
+
+    // MARK: - Jump Effect Coordinator
+
+    private func setupJumpCoordinator() {
+        let coordinator = JumpEffectCoordinator(
+            statusItem: statusItem,
+            viewModel: viewModel,
+            notifier: notificationManager,
+            restoreImage: { [weak self] in
+                self?.currentRingImage() ?? CircularProgressIcon.idleImage()
+            }
+        )
+        jumpCoordinator = coordinator
+        coordinator.start()
     }
 
     // MARK: - ViewModel Observation
