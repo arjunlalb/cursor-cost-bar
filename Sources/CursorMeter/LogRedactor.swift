@@ -23,6 +23,13 @@ enum LogRedactor {
         pattern: #"(?i)(authorization\s*:\s*)([^\r\n]+)"#)
     private static let bearerRegex = try! NSRegularExpression(
         pattern: #"(?i)\bbearer\s+[a-z0-9+/._\-]+=*"#)
+    // JWT: three base64url segments separated by dots, prefixed with `eyJ`.
+    private static let jwtRegex = try! NSRegularExpression(
+        pattern: #"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"#)
+    // Generic key=value tokens (cookies, query params, body fields) carrying credentials.
+    // Captures the key so it stays visible while the value is redacted.
+    private static let tokenAssignmentRegex = try! NSRegularExpression(
+        pattern: #"(?i)\b((?:[A-Za-z0-9_-]*(?:session-token|cookie|auth|token))=)([^;\s&]+)"#)
 
     static func redact(_ text: String) -> String {
         var output = text
@@ -30,6 +37,8 @@ enum LogRedactor {
         output = replace(cookieRegex, in: output, with: "$1<redacted>")
         output = replace(authRegex, in: output, with: "$1<redacted>")
         output = replace(bearerRegex, in: output, with: "Bearer <redacted>")
+        output = replace(jwtRegex, in: output, with: "<redacted-jwt>")
+        output = replace(tokenAssignmentRegex, in: output, with: "$1<redacted>")
         return output
     }
 
