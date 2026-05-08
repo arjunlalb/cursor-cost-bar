@@ -13,13 +13,21 @@ final class UpdateChecker: Sendable {
 
     private static let releasesURL = URL(string: "https://api.github.com/repos/WoojinAhn/CursorMeter/releases/latest")!
 
+    /// Dedicated ephemeral session — no shared cookie/cache storage with
+    /// the rest of the app, consistent with `CursorAPIClient`'s policy.
+    private let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 15
+        return URLSession(configuration: config)
+    }()
+
     func check() async -> Release? {
         do {
             var request = URLRequest(url: Self.releasesURL)
             request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
             request.timeoutInterval = 10
 
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await session.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200
