@@ -31,7 +31,7 @@
 - 앱 내 WebView 로그인 (Google, GitHub, Enterprise SSO 지원)
 - 자동 새로고침 (1/2/5/15분 간격 선택)
 - Keychain 기반 인증 정보 저장
-- 순수 AppKit 기반 — 최소 메모리 사용량 (~13 MB RSS)
+- 순수 AppKit 기반 — 가벼운 메모리 풋프린트 (idle ~13 MB, 팝오버를 한 번 연 이후엔 ~30 MB; macOS가 AppKit/popover state를 유지해 다시 여는 속도 즉시). 주간 차트가 필요 없고 옛 ~15 MB 풋프린트가 더 낫다면 이전 안정 릴리즈 [v0.2.1](https://github.com/WoojinAhn/CursorMeter/releases/tag/v0.2.1) 을 받으시면 됩니다.
 
 ## 보안 특성
 
