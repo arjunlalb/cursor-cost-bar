@@ -45,9 +45,11 @@ final class MenuBarPopoverViewController: NSViewController {
     private let onDemandKey      = NSTextField(labelWithString: "On-demand")
     private let onDemandValue    = NSTextField(labelWithString: "")
 
-    // Weekly chart (enterprise teams only)
-    private let weeklyChartContainer = NSView()
-    private let weeklyChartView = WeeklyUsageChartView(frame: .zero)
+    // Weekly chart (enterprise teams only). `lazy var` so a user who never
+    // opens the popover (or who's on a non-enterprise account) doesn't pay
+    // for the chart NSView allocation up front.
+    private lazy var weeklyChartContainer = NSView()
+    private lazy var weeklyChartView = WeeklyUsageChartView(frame: .zero)
     private var weeklyChartHeightConstraint: NSLayoutConstraint!
     private var weeklyChartTopConstraint: NSLayoutConstraint!
 
@@ -473,8 +475,15 @@ final class MenuBarPopoverViewController: NSViewController {
     }
 
     private func setWeeklyChartVisible(_ visible: Bool) {
-        weeklyChartHeightConstraint.constant = visible ? 76 : 0
-        weeklyChartTopConstraint.constant = visible ? 4 : 0
+        // `weeklyChartHeightConstraint` / `weeklyChartTopConstraint` are
+        // populated inside `buildDataStack` (only called from `loadView`).
+        // Guard so an early `updateUI()` (e.g. fired from `observePopover`
+        // before the popover is shown) can't trip an implicit-unwrap crash.
+        guard let heightConstraint = weeklyChartHeightConstraint,
+              let topConstraint = weeklyChartTopConstraint
+        else { return }
+        heightConstraint.constant = visible ? 76 : 0
+        topConstraint.constant = visible ? 4 : 0
         weeklyChartView.isHidden = !visible
         weeklyChartContainer.invalidateIntrinsicContentSize()
         dataStack.needsLayout = true
