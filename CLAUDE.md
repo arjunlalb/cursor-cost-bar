@@ -24,6 +24,11 @@ cp -r CursorMeter.app /Applications/  # 4. Copy new bundle
 open /Applications/CursorMeter.app    # 5. Launch
 ```
 
+## Log Inspection
+
+- `log` is a zsh builtin — use `/usr/bin/log` to invoke macOS unified logging
+- `Log.info` entries require `--info --debug` flags: `/usr/bin/log show --predicate 'subsystem == "com.cursormeter"' --info --debug --last 5m`
+
 ## Issue Workflow
 
 Every feature issue follows this sequence:
@@ -33,6 +38,13 @@ Every feature issue follows this sequence:
 3. **`swift test`** — All tests must pass (currently 197)
 4. **Commit/push** — Reference issue number in commit message
 5. **Post-close check** — After closing an issue, run `gh issue list --state open` and show remaining issues to the user
+
+Out-of-scope discoveries during work (bugs / risks outside the requested change) → record in `.claude/notes.md` (gitignored), do not auto-fix.
+
+## Release Workflow
+
+- `release.yml` (tag push) auto-generates body. For curated notes, after workflow completes: `gh release edit <tag> --notes-file <path>` to overwrite
+- Roll back a not-yet-distributed release (download_count ≈ 0) and re-tag same version: `gh release delete <tag> --cleanup-tag` then `git fetch --prune --prune-tags origin`
 
 ## Architecture
 
@@ -65,10 +77,12 @@ Two undocumented endpoints used (cookie-based auth, no official schema):
 - `UsageViewModel.refresh()` calls all three in parallel with graceful degradation
 - `/api/usage` uses dynamic key parsing (no hardcoded model names)
 - Reference project: [steipete/CodexBar](https://github.com/steipete/CodexBar) uses same dual-API strategy
+- **Full endpoint reference** (used + observed-but-unused): [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md). Re-verify against a fresh dashboard capture if schemas drift.
 
 ## Conventions
 
 - Swift 6 strict concurrency: `@MainActor`, `actor`, `Sendable`
+- CI Xcode 16.4 / macOS 15.5 SDK is stricter than local Xcode on Sendable across `await`. Non-Sendable Apple SDK types (e.g. `UNNotificationSettings`) returned to a `nonisolated` context need `@preconcurrency import` on the framework
 - Zero external dependencies — macOS SDK only (`Foundation`, `AppKit`, `Security`, `WebKit`, `UserNotifications`)
 - `URLSessionConfiguration.ephemeral` — no disk cache (also applies to `UpdateChecker`)
 - Keychain via standard macOS Keychain (Data Protection Keychain requires entitlements unavailable to ad-hoc signed apps)
