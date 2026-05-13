@@ -171,6 +171,11 @@ final class UsageViewModel {
 
     func onLoginSuccess(cookieHeader: String) {
         cachedCookieHeader = cookieHeader
+        // The previous session's per-account caches must not leak into the
+        // new account — a user signing in to a different team would
+        // otherwise see the prior team's weekly data, baselines, and
+        // membership flag until the next logout/login round-trip.
+        resetPerAccountState()
         do {
             try KeychainStore.saveCookieHeader(cookieHeader)
             Log.info("Cookie header saved to Keychain")
@@ -178,6 +183,19 @@ final class UsageViewModel {
             Log.error("Failed to save cookie: \(error)")
         }
         startSession()
+    }
+
+    private func resetPerAccountState() {
+        cachedTeamId = nil
+        weeklyData = nil
+        isEnterpriseTeam = false
+        previousCycleStart = nil
+        previousPlanUsedCents = nil
+        previousRequestsUsed = nil
+        previousServerPercent = nil
+        previousMode = nil
+        lastJump = nil
+        notificationManager.resetNotifications()
     }
 
     private func startSession() {
@@ -350,8 +368,17 @@ final class UsageViewModel {
             // of UTC→local edge slippage near midnight.
             weeklyData = response.sevenDayRolling(today: now, calendar: calendar)
             isEnterpriseTeam = true
+        } catch APIError.forbidden {
+            // 403 here means the cached team id is no longer authoritative —
+            // the user was removed from the team, downgraded from enterprise,
+            // or switched accounts. Drop the cache so the next refresh re-
+            // resolves it cleanly, and surface the chart-off state immediately.
+            Log.info("Weekly analytics returned 403 — clearing enterprise cache")
+            cachedTeamId = nil
+            isEnterpriseTeam = false
+            weeklyData = nil
         } catch {
-            // Keep the previous cache. If we never had one, gate the chart off.
+            // Other failures (network blip, server hiccup) keep the cache.
             Log.info("Weekly fetch failed: \(error.localizedDescription)")
             if weeklyData == nil {
                 isEnterpriseTeam = false
