@@ -21,6 +21,11 @@ final class JumpEffectCoordinator {
     private var swapTimer: Timer?
     private var isObserving = false
 
+    /// True while an emoji is currently displayed in the status item and the
+    /// restore timer is still pending. Callers can consult this to avoid
+    /// clobbering the emoji with a stale ring image.
+    var isSwapping: Bool { swapTimer != nil }
+
     init(
         statusItem: NSStatusItem,
         viewModel: UsageViewModel,

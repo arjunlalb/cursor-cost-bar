@@ -37,7 +37,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupJumpCoordinator()
 
         viewModel.checkExistingSession()
-        observeViewModel()
+        observeStatusItem()
+        observePopover()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -64,6 +65,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatusItem() {
+        // Skip while the jump coordinator is showing an emoji glyph — otherwise
+        // a subsequent viewModel mutation (weekly fetch, isLoading flip, etc.)
+        // would clobber the emoji before its restore timer fires.
+        if jumpCoordinator?.isSwapping == true { return }
         statusItem?.button?.image = currentRingImage()
     }
 
@@ -198,14 +203,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - ViewModel Observation
 
-    // Subscribes to @Observable viewModel changes using Swift Observation's
-    // withObservationTracking. The onChange callback fires once per change,
-    // so we re-subscribe inside it to continue tracking subsequent mutations.
-    private func observeViewModel() {
+    // Two separate tracking blocks so a weekly-chart-only mutation doesn't
+    // force the menu-bar ring to re-rasterize, and a refresh-interval change
+    // doesn't redraw the popover for no reason. Each block re-arms itself
+    // after onChange because `withObservationTracking` is one-shot.
+    private func observeStatusItem() {
         withObservationTracking {
-            // Access every property that should trigger a status item or popover redraw.
             _ = viewModel.usageData
             _ = viewModel.menuBarDisplayMode
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.updateStatusItem()
+                self.observeStatusItem()
+            }
+        }
+    }
+
+    private func observePopover() {
+        withObservationTracking {
+            _ = viewModel.usageData
             _ = viewModel.isLoading
             _ = viewModel.errorMessage
             _ = viewModel.authState
@@ -216,12 +233,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = viewModel.weeklyChartEnabled
             _ = viewModel.weeklyChartStyle
         } onChange: { [weak self] in
-            // onChange is called on an arbitrary thread; dispatch back to MainActor.
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.updateStatusItem()
                 (self.popover.contentViewController as? MenuBarPopoverViewController)?.updateUI()
-                self.observeViewModel() // Re-subscribe for the next change.
+                self.observePopover()
             }
         }
     }
