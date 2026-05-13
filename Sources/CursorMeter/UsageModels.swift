@@ -216,6 +216,22 @@ struct UsageDisplayData: Sendable {
         return f
     }()
 
+    // MARK: - Shared factory helpers
+
+    private static func parseDate(_ string: String?) -> Date? {
+        guard let string else { return nil }
+        return iso8601.date(from: string)
+    }
+
+    private static func daysUntilReset(to resetDate: Date?) -> Int? {
+        guard let resetDate else { return nil }
+        return Calendar.current.dateComponents([.day], from: Date(), to: resetDate).day
+    }
+
+    private static func requestCount(_ model: ModelUsage?) -> Int {
+        model?.numRequestsTotal ?? model?.numRequests ?? 0
+    }
+
     // MARK: - Factory: summary (primary) + usage (supplementary)
 
     static func from(
@@ -225,22 +241,7 @@ struct UsageDisplayData: Sendable {
     ) -> UsageDisplayData {
         let model = usage?.primaryModel
         let isRequestBased = model?.maxRequestUsage != nil
-
-        let cycleStartDate: Date? = {
-            guard let str = summary.billingCycleStart else { return nil }
-            return iso8601.date(from: str)
-        }()
-
-        let resetDate: Date? = {
-            guard let str = summary.billingCycleEnd else { return nil }
-            return iso8601.date(from: str)
-        }()
-
-        let daysUntilReset: Int? = {
-            guard let end = resetDate else { return nil }
-            return Calendar.current.dateComponents([.day], from: Date(), to: end).day
-        }()
-
+        let resetDate = parseDate(summary.billingCycleEnd)
         let plan = summary.individualUsage?.plan
         let onDemand = summary.individualUsage?.onDemand
 
@@ -251,13 +252,13 @@ struct UsageDisplayData: Sendable {
             planUsedCents: isRequestBased ? nil : plan?.used,
             planLimitCents: isRequestBased ? nil : plan?.limit,
             serverPercentUsed: plan?.totalPercentUsed,
-            requestsUsed: isRequestBased ? (model?.numRequestsTotal ?? model?.numRequests ?? 0) : 0,
+            requestsUsed: isRequestBased ? requestCount(model) : 0,
             requestsLimit: isRequestBased ? (model?.maxRequestUsage ?? 0) : 0,
             onDemandUsedCents: onDemand?.used,
             onDemandLimitCents: onDemand?.limit,
-            cycleStartDate: cycleStartDate,
+            cycleStartDate: parseDate(summary.billingCycleStart),
             resetDate: resetDate,
-            daysUntilReset: daysUntilReset
+            daysUntilReset: daysUntilReset(to: resetDate)
         )
     }
 
@@ -265,17 +266,9 @@ struct UsageDisplayData: Sendable {
 
     static func from(usage: UsageResponse, userInfo: UserInfoResponse) -> UsageDisplayData {
         let model = usage.primaryModel
-
-        let resetDate: Date? = {
-            guard let str = usage.startOfMonth else { return nil }
-            guard let start = iso8601.date(from: str) else { return nil }
-            return Calendar.current.date(byAdding: .month, value: 1, to: start)
-        }()
-
-        let daysUntilReset: Int? = {
-            guard let end = resetDate else { return nil }
-            return Calendar.current.dateComponents([.day], from: Date(), to: end).day
-        }()
+        let resetDate: Date? = parseDate(usage.startOfMonth).flatMap {
+            Calendar.current.date(byAdding: .month, value: 1, to: $0)
+        }
 
         return UsageDisplayData(
             email: userInfo.email ?? "Unknown",
@@ -284,13 +277,13 @@ struct UsageDisplayData: Sendable {
             planUsedCents: nil,
             planLimitCents: nil,
             serverPercentUsed: nil,
-            requestsUsed: model?.numRequestsTotal ?? model?.numRequests ?? 0,
+            requestsUsed: requestCount(model),
             requestsLimit: model?.maxRequestUsage ?? 0,
             onDemandUsedCents: nil,
             onDemandLimitCents: nil,
             cycleStartDate: nil,
             resetDate: resetDate,
-            daysUntilReset: daysUntilReset
+            daysUntilReset: daysUntilReset(to: resetDate)
         )
     }
 }

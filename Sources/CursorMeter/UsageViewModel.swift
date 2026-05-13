@@ -144,6 +144,11 @@ final class UsageViewModel {
     /// on every cycle.
     private var cachedTeamId: Int?
 
+    /// Last successful user email — needed to issue an optimistic parallel
+    /// weekly fetch on subsequent refreshes without waiting for the userInfo
+    /// response from this cycle.
+    private var cachedUserEmail: String?
+
     /// Last observed billing-cycle start. Used to detect cycle rollover so we
     /// can clear the threshold-notification dedup set and let the user know
     /// when usage crosses 80/90 in the new cycle.
@@ -187,6 +192,7 @@ final class UsageViewModel {
 
     private func resetPerAccountState() {
         cachedTeamId = nil
+        cachedUserEmail = nil
         weeklyData = nil
         isEnterpriseTeam = false
         previousCycleStart = nil
@@ -220,6 +226,14 @@ final class UsageViewModel {
             async let usageResult = apiClient.fetchUsage(cookieHeader: cookieHeader)
             async let userInfoResult = apiClient.fetchUserInfo(cookieHeader: cookieHeader)
 
+            // Optimistic weekly fetch — runs in parallel with the primary batch
+            // once we have a cached teamId + email from a prior refresh. Saves
+            // one round-trip on every subsequent enterprise refresh. First
+            // refresh after login falls back to the sequential path inside
+            // `refreshWeeklyChart`.
+            let optimisticWeekly: Task<WeeklyUsageResponse, Error>? =
+                makeOptimisticWeeklyTask(cookieHeader: cookieHeader)
+
             let userInfo = try await userInfoResult
 
             let summary = try? await summaryResult
@@ -242,9 +256,12 @@ final class UsageViewModel {
                 updateJumpState(from: data)
             }
 
-            // Weekly chart fetch (enterprise teams only). Failures are absorbed —
-            // last successful weeklyData stays in place.
-            if let data = usageData {
+            // Weekly chart: consume the optimistic task if we had one, otherwise
+            // fall through to the sequential path that resolves teamId first.
+            cachedUserEmail = userInfo.email
+            if let task = optimisticWeekly {
+                await applyOptimisticWeekly(task)
+            } else if let data = usageData {
                 await refreshWeeklyChart(cookieHeader: cookieHeader, data: data, userInfo: userInfo)
             }
 
@@ -319,6 +336,56 @@ final class UsageViewModel {
         f.dateFormat = "yyyy-MM-dd"
         return f
     }()
+
+    /// Returns a parallel-startable weekly fetch when state allows, or nil to
+    /// signal the caller should run the sequential `refreshWeeklyChart` path.
+    private func makeOptimisticWeeklyTask(
+        cookieHeader: String
+    ) -> Task<WeeklyUsageResponse, Error>? {
+        guard let teamId = cachedTeamId,
+              let email = cachedUserEmail, !email.isEmpty
+        else { return nil }
+        let (startDay, endDay) = Self.weeklyWindow(today: Date(), calendar: .current)
+        let apiClient = self.apiClient
+        return Task {
+            try await apiClient.fetchWeeklyUsage(
+                cookieHeader: cookieHeader,
+                teamId: teamId,
+                user: email,
+                startDate: startDay,
+                endDate: endDay
+            )
+        }
+    }
+
+    private static func weeklyWindow(today: Date, calendar: Calendar) -> (start: String, end: String) {
+        let endDay = weeklyDateFormatter.string(from: today)
+        let startDay = weeklyDateFormatter.string(
+            from: calendar.date(byAdding: .day, value: -6, to: today) ?? today
+        )
+        return (startDay, endDay)
+    }
+
+    /// Consumes the parallel weekly fetch result. Same error-handling shape as
+    /// the sequential `refreshWeeklyChart` 403 / generic branches, so the two
+    /// paths converge on the same observable state.
+    private func applyOptimisticWeekly(_ task: Task<WeeklyUsageResponse, Error>) async {
+        do {
+            let response = try await task.value
+            weeklyData = response.sevenDayRolling(today: Date(), calendar: .current)
+            isEnterpriseTeam = true
+        } catch APIError.forbidden {
+            Log.info("Weekly analytics returned 403 — clearing enterprise cache")
+            cachedTeamId = nil
+            isEnterpriseTeam = false
+            weeklyData = nil
+        } catch {
+            Log.info("Weekly fetch failed: \(error.localizedDescription)")
+            if weeklyData == nil {
+                isEnterpriseTeam = false
+            }
+        }
+    }
 
     private func refreshWeeklyChart(
         cookieHeader: String,

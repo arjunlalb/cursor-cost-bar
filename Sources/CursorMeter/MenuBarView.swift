@@ -439,7 +439,7 @@ final class MenuBarPopoverViewController: NSViewController {
 
         // Progress
         progressBar.progress = min(data.percentUsed / 100.0, 1.0)
-        progressBar.barColor = progressNSColor(for: data.percentUsed)
+        progressBar.barColor = CircularProgressIcon.tokenColor(for: data.percentUsed)
         percentLabel.stringValue = data.percentText
 
         // On-demand
@@ -619,14 +619,6 @@ final class MenuBarPopoverViewController: NSViewController {
         label.wantsLayer      = true
         label.layer?.cornerRadius = 3
         label.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-    }
-
-    // MARK: - Progress color (NSColor mapping matching CircularProgressIcon thresholds)
-
-    private func progressNSColor(for percent: Double) -> NSColor {
-        if percent >= 90 { return NSColor.systemRed }
-        if percent >= 80 { return NSColor.systemYellow }
-        return NSColor.systemGreen
     }
 
     // MARK: - Actions

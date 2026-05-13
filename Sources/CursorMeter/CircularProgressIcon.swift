@@ -31,6 +31,16 @@ enum CircularProgressIcon {
         return .normal
     }
 
+    /// Maps a plan-percent (0–100+) to one of the shared color tokens.
+    /// Single source of truth for both the menu-bar ring and the popover
+    /// progress bar — prevents the bands from drifting (e.g. ring=green
+    /// while progress bar=yellow at the same value).
+    static func tokenColor(for percent: Double) -> NSColor {
+        if percent >= 90 { return critColor }
+        if percent >= 70 { return warnColor }
+        return accentColor
+    }
+
     /// Pie chart icon only
     static func menuBarImage(percent: Double, size: CGFloat = 18) -> NSImage {
         let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
@@ -233,9 +243,7 @@ enum CircularProgressIcon {
     // MARK: - Private
 
     private static func pieColor(for percent: Double) -> NSColor {
-        if percent >= 90 { return critColor }
-        if percent >= 70 { return warnColor }
-        return accentColor
+        tokenColor(for: percent)
     }
 
     private static func drawPie(in ctx: CGContext, rect: CGRect, percent: Double) {
