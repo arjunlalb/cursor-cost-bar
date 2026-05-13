@@ -23,8 +23,9 @@
 - 메뉴바에서 빌링 사용량, 모델별 요청 횟수, 리셋 날짜 확인
 - 사용량 임계치 도달 시 macOS 알림 (기본값: 65%/90%, 커스텀 가능)
 - **사용량 점프 이펙트** — 사용량이 한 번에 크게 올라가면 메뉴바 아이콘에 ⚡(중간 점프) 또는 🚀(Max 모드급 점프)가 잠시 표시되어, 갑작스런 증가를 놓치지 않게 합니다. 강도 3단계(Quiet / Normal / Bold) 선택 가능, Bold + 큰 점프 조합에선 macOS 알림도 함께 띄움.
+- **주간 사용량 차트** (엔터프라이즈 팀 계정) — 팝오버에 최근 7일 막대 그래프 표시. y축은 자동 스케일, 일일 예산 dashed reference line, hover tooltip, 오늘 강조 스타일 3가지(Outline / Dim / Both) 선택 가능.
 - 메뉴바 표시 모드 전환: 분수(사용/한도) 또는 퍼센트(%)
-- 설정 UI (새로고침 간격, 알림 임계치, 메뉴바 표시 형식, 점프 이펙트 강도)
+- 설정 UI (새로고침 간격, 알림 임계치, 메뉴바 표시 형식, 점프 이펙트 강도, 주간 차트 스타일)
 - 로그인 시 자동 실행 지원
 - 앱 내 업데이트 확인
 - 앱 내 WebView 로그인 (Google, GitHub, Enterprise SSO 지원)
@@ -35,7 +36,7 @@
 ## 보안 특성
 
 - 외부 의존성 0개 (macOS SDK만 사용)
-- 2계층 WebView 호스트 화이트리스트 (exact + suffix), navigation action / response 양쪽에서 검증
+- 2계층 WebView 호스트 화이트리스트 (exact + suffix), navigation action / response 양쪽에서 `https` 스킴까지 검증
 - 로그인 세션 저장 전 필수 쿠키 검증
 - GitHub Releases API에서 받은 URL은 호스트 검증 후 `NSWorkspace.open` 호출
 - `URLSessionConfiguration.ephemeral` (디스크 캐시 없음)
@@ -93,12 +94,14 @@ Unit test (LogRedactor, UsageDisplayData, DomainWhitelist, CircularProgressIcon,
   <tr>
     <th align="center">메뉴바</th>
     <th align="center">팝오버</th>
+    <th align="center">주간 차트 (엔터프라이즈)</th>
     <th align="center">설정</th>
   </tr>
   <tr>
     <td align="center" valign="top"><img src="docs/screenshots/menubar.png" alt="메뉴바" height="40"></td>
-    <td align="center" valign="top"><img src="docs/screenshots/popover.png" alt="팝오버" width="280"></td>
-    <td align="center" valign="top"><img src="docs/screenshots/settings.png" alt="설정" width="280"></td>
+    <td align="center" valign="top"><img src="docs/screenshots/popover.png" alt="팝오버" width="240"></td>
+    <td align="center" valign="top"><img src="docs/screenshots/popover-weekly.png" alt="주간 차트" width="240"></td>
+    <td align="center" valign="top"><img src="docs/screenshots/settings.png" alt="설정" width="240"></td>
   </tr>
 </table>
 

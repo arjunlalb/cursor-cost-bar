@@ -23,8 +23,9 @@ Unlike in-editor extensions, CursorMeter runs independently as a native macOS ap
 - View billing usage, per-model request counts, and reset date from the menu bar
 - macOS notifications when usage reaches customizable thresholds (default: 65%/90%)
 - **Usage-jump effect** — menu bar icon flashes ⚡ on a moderate jump and 🚀 on a Max-mode-sized jump, so a sudden spike is hard to miss. Three intensity levels (Quiet / Normal / Bold); Bold also raises a macOS notification on tier-2 jumps.
+- **Weekly usage chart** (enterprise team accounts) — rolling 7-day bar graph in the popover with adaptive y-axis, dashed daily-budget reference line, hover tooltip, and a configurable today-highlight (Outline / Dim others / Both).
 - Menu bar display mode toggle: fraction (used/limit) or percentage (%)
-- Settings UI (refresh interval, notification thresholds, menu bar display format, jump-effect intensity)
+- Settings UI (refresh interval, notification thresholds, menu bar display format, jump-effect intensity, weekly-chart style)
 - Launch at login support
 - In-app update checker
 - In-app WebView login (Google, GitHub, Enterprise SSO)
@@ -35,7 +36,7 @@ Unlike in-editor extensions, CursorMeter runs independently as a native macOS ap
 ## Security
 
 - Zero external dependencies (macOS SDK only)
-- Two-tier WebView host whitelist (exact + suffix), validated on both navigation action and response
+- Two-tier WebView host whitelist (exact + suffix), with `https`-scheme enforcement on both navigation action and response
 - Required-cookie validation before persisting a login session
 - Host-validated `NSWorkspace.open` for any URL derived from the GitHub Releases API
 - `URLSessionConfiguration.ephemeral` (no disk cache)
@@ -93,12 +94,14 @@ Found a bug or have an idea? [Open an issue](https://github.com/WoojinAhn/Cursor
   <tr>
     <th align="center">Menu bar</th>
     <th align="center">Popover</th>
+    <th align="center">Weekly chart (Enterprise)</th>
     <th align="center">Settings</th>
   </tr>
   <tr>
     <td align="center" valign="top"><img src="docs/screenshots/menubar.png" alt="Menu bar" height="40"></td>
-    <td align="center" valign="top"><img src="docs/screenshots/popover.png" alt="Popover" width="280"></td>
-    <td align="center" valign="top"><img src="docs/screenshots/settings.png" alt="Settings" width="280"></td>
+    <td align="center" valign="top"><img src="docs/screenshots/popover.png" alt="Popover" width="240"></td>
+    <td align="center" valign="top"><img src="docs/screenshots/popover-weekly.png" alt="Weekly chart" width="240"></td>
+    <td align="center" valign="top"><img src="docs/screenshots/settings.png" alt="Settings" width="240"></td>
   </tr>
 </table>
 
