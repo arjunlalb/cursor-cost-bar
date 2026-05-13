@@ -7,6 +7,28 @@ enum AuthState {
     case loginRequired
 }
 
+/// Centralized UserDefaults keys. Avoids the typo class of bug where a
+/// setter writes one literal and `loadSettings` reads a slightly different one.
+private enum SettingsKey: String {
+    case refreshInterval = "refreshIntervalSeconds"
+    case notificationEnabled
+    case warningThreshold
+    case criticalThreshold
+    case menuBarDisplayMode
+    case jumpEffectEnabled
+    case jumpIntensity
+    case weeklyChartEnabled
+    case weeklyChartStyle
+    // Legacy keys consulted only by `loadSettings` migration block.
+    case legacyShowMenuBarText = "showMenuBarText"
+    case legacyShowMenuBarPercent = "showMenuBarPercent"
+}
+
+private extension UserDefaults {
+    func set(_ value: Any?, for key: SettingsKey) { set(value, forKey: key.rawValue) }
+    func object(for key: SettingsKey) -> Any? { object(forKey: key.rawValue) }
+}
+
 enum RefreshInterval: Int, CaseIterable {
     case oneMinute = 60
     case twoMinutes = 120
@@ -334,7 +356,7 @@ final class UsageViewModel {
 
     func setRefreshInterval(_ interval: RefreshInterval) {
         refreshInterval = interval
-        UserDefaults.standard.set(interval.rawValue, forKey: "refreshIntervalSeconds")
+        UserDefaults.standard.set(interval.rawValue, for: .refreshInterval)
         if authState == .loggedIn {
             startAutoRefresh()
         }
@@ -342,42 +364,42 @@ final class UsageViewModel {
 
     func setNotificationEnabled(_ enabled: Bool) {
         notificationEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: "notificationEnabled")
+        UserDefaults.standard.set(enabled, for: .notificationEnabled)
     }
 
     func setWarningThreshold(_ value: Int) {
         warningThreshold = value
-        UserDefaults.standard.set(value, forKey: "warningThreshold")
+        UserDefaults.standard.set(value, for: .warningThreshold)
     }
 
     func setCriticalThreshold(_ value: Int) {
         criticalThreshold = value
-        UserDefaults.standard.set(value, forKey: "criticalThreshold")
+        UserDefaults.standard.set(value, for: .criticalThreshold)
     }
 
     func setMenuBarDisplayMode(_ mode: Int) {
         menuBarDisplayMode = mode
-        UserDefaults.standard.set(mode, forKey: "menuBarDisplayMode")
+        UserDefaults.standard.set(mode, for: .menuBarDisplayMode)
     }
 
     func setJumpEffectEnabled(_ enabled: Bool) {
         jumpEffectEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: "jumpEffectEnabled")
+        UserDefaults.standard.set(enabled, for: .jumpEffectEnabled)
     }
 
     func setJumpIntensity(_ intensity: JumpIntensity) {
         jumpIntensity = intensity
-        UserDefaults.standard.set(intensity.rawValue, forKey: "jumpIntensity")
+        UserDefaults.standard.set(intensity.rawValue, for: .jumpIntensity)
     }
 
     func setWeeklyChartEnabled(_ enabled: Bool) {
         weeklyChartEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: "weeklyChartEnabled")
+        UserDefaults.standard.set(enabled, for: .weeklyChartEnabled)
     }
 
     func setWeeklyChartStyle(_ style: WeeklyChartStyle) {
         weeklyChartStyle = style
-        UserDefaults.standard.set(style.rawValue, forKey: "weeklyChartStyle")
+        UserDefaults.standard.set(style.rawValue, for: .weeklyChartStyle)
     }
 
     func checkForUpdate() async {
@@ -396,44 +418,44 @@ final class UsageViewModel {
 
     private func loadSettings() {
         let defaults = UserDefaults.standard
-        if let raw = defaults.object(forKey: "refreshIntervalSeconds") as? Int,
+        if let raw = defaults.object(for: .refreshInterval) as? Int,
            let interval = RefreshInterval(rawValue: raw)
         {
             refreshInterval = interval
         }
-        if let val = defaults.object(forKey: "notificationEnabled") as? Bool {
+        if let val = defaults.object(for: .notificationEnabled) as? Bool {
             notificationEnabled = val
         }
-        if let val = defaults.object(forKey: "warningThreshold") as? Int {
+        if let val = defaults.object(for: .warningThreshold) as? Int {
             warningThreshold = min(val, 90)
         }
-        if let val = defaults.object(forKey: "criticalThreshold") as? Int {
+        if let val = defaults.object(for: .criticalThreshold) as? Int {
             criticalThreshold = max(min(val, 100), warningThreshold + 5)
         }
-        if let val = defaults.object(forKey: "menuBarDisplayMode") as? Int {
+        if let val = defaults.object(for: .menuBarDisplayMode) as? Int {
             menuBarDisplayMode = val
         } else {
             // Migrate from old boolean settings
-            let hadText = defaults.object(forKey: "showMenuBarText") as? Bool ?? false
-            let hadPercent = defaults.object(forKey: "showMenuBarPercent") as? Bool ?? false
+            let hadText = defaults.object(for: .legacyShowMenuBarText) as? Bool ?? false
+            let hadPercent = defaults.object(for: .legacyShowMenuBarPercent) as? Bool ?? false
             if hadText && hadPercent {
                 menuBarDisplayMode = 2
             } else if hadText {
                 menuBarDisplayMode = 1
             }
         }
-        if let val = defaults.object(forKey: "jumpEffectEnabled") as? Bool {
+        if let val = defaults.object(for: .jumpEffectEnabled) as? Bool {
             jumpEffectEnabled = val
         }
-        if let raw = defaults.object(forKey: "jumpIntensity") as? Int,
+        if let raw = defaults.object(for: .jumpIntensity) as? Int,
            let intensity = JumpIntensity(rawValue: raw)
         {
             jumpIntensity = intensity
         }
-        if let val = defaults.object(forKey: "weeklyChartEnabled") as? Bool {
+        if let val = defaults.object(for: .weeklyChartEnabled) as? Bool {
             weeklyChartEnabled = val
         }
-        if let raw = defaults.object(forKey: "weeklyChartStyle") as? Int,
+        if let raw = defaults.object(for: .weeklyChartStyle) as? Int,
            let style = WeeklyChartStyle(rawValue: raw)
         {
             weeklyChartStyle = style
@@ -503,13 +525,14 @@ final class UsageViewModel {
 
         guard let prev = previous, !modeChanged else {
             // First refresh in this mode: only set baseline.
-            lastJump = nil
+            // Guard against `@Observable` firing on `nil → nil` every refresh.
+            if lastJump != nil { lastJump = nil }
             return
         }
 
         let delta = current - prev
         guard delta > 0 else {
-            lastJump = nil
+            if lastJump != nil { lastJump = nil }
             return
         }
 

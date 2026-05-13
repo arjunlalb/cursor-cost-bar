@@ -60,10 +60,7 @@ extension WeeklyUsageResponse {
     /// UTC in tests for determinism.
     func sevenDayRolling(today: Date = Date(), calendar: Calendar = .current) -> [DayUsage] {
         let startOfToday = calendar.startOfDay(for: today)
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.timeZone = calendar.timeZone
-        formatter.dateFormat = "yyyy-MM-dd"
+        let formatter = Self.dayKeyFormatter(for: calendar)
 
         let byDate = Dictionary(uniqueKeysWithValues: data.map { ($0.eventDate, $0) })
 
@@ -73,5 +70,23 @@ extension WeeklyUsageResponse {
             let requests = byDate[key]?.totalRequests ?? 0
             return DayUsage(date: day, requests: requests, isToday: offset == 0)
         }
+    }
+
+    /// Cached `yyyy-MM-dd` formatter keyed by calendar timezone. `sevenDayRolling`
+    /// gets called on every refresh; allocating a fresh `DateFormatter` (~100µs)
+    /// each time is wasteful when the timezone is effectively fixed in production.
+    /// MainActor-only callsites today, but the cache itself is read-only after
+    /// first miss per timezone so concurrent reads are safe.
+    private nonisolated(unsafe) static var formatterCache: [String: DateFormatter] = [:]
+
+    private static func dayKeyFormatter(for calendar: Calendar) -> DateFormatter {
+        let key = calendar.timeZone.identifier
+        if let cached = formatterCache[key] { return cached }
+        let f = DateFormatter()
+        f.calendar = calendar
+        f.timeZone = calendar.timeZone
+        f.dateFormat = "yyyy-MM-dd"
+        formatterCache[key] = f
+        return f
     }
 }
