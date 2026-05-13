@@ -144,6 +144,11 @@ final class UsageViewModel {
     /// on every cycle.
     private var cachedTeamId: Int?
 
+    /// Last observed billing-cycle start. Used to detect cycle rollover so we
+    /// can clear the threshold-notification dedup set and let the user know
+    /// when usage crosses 80/90 in the new cycle.
+    private var previousCycleStart: Date?
+
     // MARK: - Init
 
     init() {
@@ -225,6 +230,17 @@ final class UsageViewModel {
                 await refreshWeeklyChart(cookieHeader: cookieHeader, data: data, userInfo: userInfo)
             }
 
+            // Detect billing-cycle rollover so threshold alerts re-arm for the
+            // new cycle. Without this, `notifiedThresholds` would only clear on
+            // logout, leaving the user silent through a full new cycle.
+            if let newStart = usageData?.cycleStartDate, newStart != previousCycleStart {
+                if previousCycleStart != nil {
+                    notificationManager.resetNotifications()
+                    Log.info("Billing cycle rollover detected — threshold notifications reset")
+                }
+                previousCycleStart = newStart
+            }
+
             // Check notification thresholds
             if let data = usageData {
                 await notificationManager.checkAndNotify(
@@ -250,7 +266,16 @@ final class UsageViewModel {
             Log.error("API returned 403 Forbidden")
         } catch {
             if usageData == nil {
-                let urlError = error as? URLError
+                // URLSession failures are wrapped as `APIError.networkError(URLError)`
+                // by the API client, so direct cast misses offline cases. Unwrap both
+                // layers before deciding whether to schedule a background retry.
+                let urlError: URLError? = {
+                    if let direct = error as? URLError { return direct }
+                    if case APIError.networkError(let underlying) = error {
+                        return underlying as? URLError
+                    }
+                    return nil
+                }()
                 if urlError?.code == .notConnectedToInternet || urlError?.code == .networkConnectionLost {
                     errorMessage = "Waiting for network..."
                     scheduleNetworkRetry()
@@ -347,6 +372,7 @@ final class UsageViewModel {
         weeklyData = nil
         isEnterpriseTeam = false
         cachedTeamId = nil
+        previousCycleStart = nil
         stopAutoRefresh()
         notificationManager.resetNotifications()
         Log.info("Logged out")
