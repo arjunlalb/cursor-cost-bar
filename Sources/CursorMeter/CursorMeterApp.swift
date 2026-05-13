@@ -104,11 +104,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover = NSPopover()
         popover.behavior = .transient
         popover.animates = true
-        popover.contentViewController = MenuBarPopoverViewController(
+        let popoverVC = MenuBarPopoverViewController(
             viewModel: viewModel,
             onLogin: { [weak self] in self?.showLogin() },
             onSettings: { [weak self] in self?.hidePopover(); self?.openSettings() }
         )
+        popoverVC.onContentSizeChange = { [weak self] size in
+            guard let self else { return }
+            // Clamp to non-zero; fittingSize can briefly report zero pre-layout.
+            guard size.width > 0, size.height > 0 else { return }
+            self.popover.contentSize = size
+        }
+        popover.contentViewController = popoverVC
     }
 
     private func showPopover() {
@@ -204,6 +211,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = viewModel.authState
             _ = viewModel.availableUpdate
             _ = viewModel.refreshInterval
+            _ = viewModel.weeklyData
+            _ = viewModel.isEnterpriseTeam
+            _ = viewModel.weeklyChartEnabled
+            _ = viewModel.weeklyChartStyle
         } onChange: { [weak self] in
             // onChange is called on an arbitrary thread; dispatch back to MainActor.
             Task { @MainActor [weak self] in

@@ -54,6 +54,13 @@ enum JumpIntensity: Int, Sendable, CaseIterable {
     case bold = 2
 }
 
+/// Today-bar emphasis style for the weekly chart.
+enum WeeklyChartStyle: Int, Sendable, CaseIterable {
+    case outline = 0
+    case dimOthers = 1
+    case both = 2
+}
+
 @Observable
 @MainActor
 final class UsageViewModel {
@@ -83,6 +90,18 @@ final class UsageViewModel {
     var jumpEffectEnabled: Bool = true
     var jumpIntensity: JumpIntensity = .normal
 
+    // MARK: - Weekly Chart
+
+    /// Last successful weekly fetch, retained across failed refreshes so the
+    /// chart keeps rendering when the network blips.
+    var weeklyData: [DayUsage]?
+    /// True when the active account is an enterprise team (membershipType ==
+    /// "enterprise" AND a teamId was discovered AND the analytics endpoint
+    /// responded 200 at least once).
+    var isEnterpriseTeam: Bool = false
+    var weeklyChartEnabled: Bool = true
+    var weeklyChartStyle: WeeklyChartStyle = .outline
+
     // MARK: - Private
 
     private var isRefreshing = false
@@ -97,6 +116,11 @@ final class UsageViewModel {
     private var previousRequestsUsed: Int?
     private var previousServerPercent: Double?
     private var previousMode: JumpEvent.Mode?
+
+    /// Discovered team id, cached after the first successful teams fetch.
+    /// Stays set across refreshes so we don't re-call `/api/dashboard/teams`
+    /// on every cycle.
+    private var cachedTeamId: Int?
 
     // MARK: - Init
 
@@ -173,6 +197,12 @@ final class UsageViewModel {
                 updateJumpState(from: data)
             }
 
+            // Weekly chart fetch (enterprise teams only). Failures are absorbed —
+            // last successful weeklyData stays in place.
+            if let data = usageData {
+                await refreshWeeklyChart(cookieHeader: cookieHeader, data: data, userInfo: userInfo)
+            }
+
             // Check notification thresholds
             if let data = usageData {
                 await notificationManager.checkAndNotify(
@@ -213,6 +243,75 @@ final class UsageViewModel {
         isRefreshing = false
     }
 
+    // MARK: - Weekly chart refresh
+
+    private static let weeklyDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        f.calendar = cal
+        f.timeZone = cal.timeZone
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private func refreshWeeklyChart(
+        cookieHeader: String,
+        data: UsageDisplayData,
+        userInfo: UserInfoResponse
+    ) async {
+        guard data.membershipType?.lowercased() == "enterprise",
+              let email = userInfo.email, !email.isEmpty
+        else {
+            isEnterpriseTeam = false
+            weeklyData = nil
+            return
+        }
+
+        if cachedTeamId == nil {
+            do {
+                let teams = try await apiClient.fetchTeams(cookieHeader: cookieHeader)
+                cachedTeamId = teams.teams.first?.id
+            } catch {
+                Log.info("Teams fetch failed (treating as non-enterprise): \(error.localizedDescription)")
+            }
+        }
+
+        guard let teamId = cachedTeamId else {
+            isEnterpriseTeam = false
+            weeklyData = nil
+            return
+        }
+
+        let now = Date()
+        let calendar = Calendar.current
+        let endDay = Self.weeklyDateFormatter.string(from: now)
+        let startDay = Self.weeklyDateFormatter.string(
+            from: calendar.date(byAdding: .day, value: -6, to: now) ?? now
+        )
+
+        do {
+            let response = try await apiClient.fetchWeeklyUsage(
+                cookieHeader: cookieHeader,
+                teamId: teamId,
+                user: email,
+                startDate: startDay,
+                endDate: endDay
+            )
+            // Local calendar for "today" is a spec decision (issue #60):
+            // labels stay intuitive for the user, at the cost of up to 1 day
+            // of UTC→local edge slippage near midnight.
+            weeklyData = response.sevenDayRolling(today: now, calendar: calendar)
+            isEnterpriseTeam = true
+        } catch {
+            // Keep the previous cache. If we never had one, gate the chart off.
+            Log.info("Weekly fetch failed: \(error.localizedDescription)")
+            if weeklyData == nil {
+                isEnterpriseTeam = false
+            }
+        }
+    }
+
     func logout() {
         cachedCookieHeader = nil
         do {
@@ -223,6 +322,9 @@ final class UsageViewModel {
         authState = .loggedOut
         usageData = nil
         errorMessage = nil
+        weeklyData = nil
+        isEnterpriseTeam = false
+        cachedTeamId = nil
         stopAutoRefresh()
         notificationManager.resetNotifications()
         Log.info("Logged out")
@@ -266,6 +368,16 @@ final class UsageViewModel {
     func setJumpIntensity(_ intensity: JumpIntensity) {
         jumpIntensity = intensity
         UserDefaults.standard.set(intensity.rawValue, forKey: "jumpIntensity")
+    }
+
+    func setWeeklyChartEnabled(_ enabled: Bool) {
+        weeklyChartEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "weeklyChartEnabled")
+    }
+
+    func setWeeklyChartStyle(_ style: WeeklyChartStyle) {
+        weeklyChartStyle = style
+        UserDefaults.standard.set(style.rawValue, forKey: "weeklyChartStyle")
     }
 
     func checkForUpdate() async {
@@ -317,6 +429,14 @@ final class UsageViewModel {
            let intensity = JumpIntensity(rawValue: raw)
         {
             jumpIntensity = intensity
+        }
+        if let val = defaults.object(forKey: "weeklyChartEnabled") as? Bool {
+            weeklyChartEnabled = val
+        }
+        if let raw = defaults.object(forKey: "weeklyChartStyle") as? Int,
+           let style = WeeklyChartStyle(rawValue: raw)
+        {
+            weeklyChartStyle = style
         }
     }
 

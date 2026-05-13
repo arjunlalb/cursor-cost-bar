@@ -115,6 +115,7 @@ struct UsageDisplayData: Sendable {
 
     let onDemandUsedCents: Int?
     let onDemandLimitCents: Int?
+    let cycleStartDate: Date?
     let resetDate: Date?
     let daysUntilReset: Int?
 
@@ -191,6 +192,17 @@ struct UsageDisplayData: Sendable {
         String(format: "%.1f", Double(cents) / 100.0)
     }
 
+    /// Daily request budget = `requestsLimit / cycleDays`. Returns nil when
+    /// inputs are missing or the cycle window is non-positive. Used by the
+    /// weekly chart's adaptive y-ceiling and dashed reference line.
+    var dailyRequestBudget: Int? {
+        guard requestsLimit > 0 else { return nil }
+        guard let start = cycleStartDate, let end = resetDate else { return nil }
+        let days = Calendar.current.dateComponents([.day], from: start, to: end).day ?? 0
+        guard days > 0 else { return nil }
+        return requestsLimit / days
+    }
+
     var resetText: String? {
         guard let days = daysUntilReset else { return nil }
         if days <= 0 { return "Resets today" }
@@ -213,6 +225,11 @@ struct UsageDisplayData: Sendable {
     ) -> UsageDisplayData {
         let model = usage?.primaryModel
         let isRequestBased = model?.maxRequestUsage != nil
+
+        let cycleStartDate: Date? = {
+            guard let str = summary.billingCycleStart else { return nil }
+            return iso8601.date(from: str)
+        }()
 
         let resetDate: Date? = {
             guard let str = summary.billingCycleEnd else { return nil }
@@ -238,6 +255,7 @@ struct UsageDisplayData: Sendable {
             requestsLimit: isRequestBased ? (model?.maxRequestUsage ?? 0) : 0,
             onDemandUsedCents: onDemand?.used,
             onDemandLimitCents: onDemand?.limit,
+            cycleStartDate: cycleStartDate,
             resetDate: resetDate,
             daysUntilReset: daysUntilReset
         )
@@ -270,6 +288,7 @@ struct UsageDisplayData: Sendable {
             requestsLimit: model?.maxRequestUsage ?? 0,
             onDemandUsedCents: nil,
             onDemandLimitCents: nil,
+            cycleStartDate: nil,
             resetDate: resetDate,
             daysUntilReset: daysUntilReset
         )

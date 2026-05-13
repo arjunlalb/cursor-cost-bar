@@ -19,6 +19,12 @@ enum ProgressLevel: Sendable, Equatable {
 // MARK: - Circular Progress Icon
 
 enum CircularProgressIcon {
+    /// Shared color tokens used by the menu-bar ring and the popover weekly chart.
+    /// Reused across surfaces so heat color never drifts between views.
+    static let accentColor = NSColor(red: 0.20, green: 0.70, blue: 0.25, alpha: 1)
+    static let warnColor = NSColor(red: 0.95, green: 0.65, blue: 0.0, alpha: 1)
+    static let critColor = NSColor(red: 0.90, green: 0.15, blue: 0.15, alpha: 1)
+
     static func level(for percent: Double) -> ProgressLevel {
         if percent >= 90 { return .critical }
         if percent >= 70 { return .warning }
@@ -227,9 +233,9 @@ enum CircularProgressIcon {
     // MARK: - Private
 
     private static func pieColor(for percent: Double) -> NSColor {
-        if percent >= 90 { return NSColor(red: 0.90, green: 0.15, blue: 0.15, alpha: 1) }
-        if percent >= 70 { return NSColor(red: 0.95, green: 0.65, blue: 0.0, alpha: 1) }
-        return NSColor(red: 0.20, green: 0.70, blue: 0.25, alpha: 1)
+        if percent >= 90 { return critColor }
+        if percent >= 70 { return warnColor }
+        return accentColor
     }
 
     private static func drawPie(in ctx: CGContext, rect: CGRect, percent: Double) {

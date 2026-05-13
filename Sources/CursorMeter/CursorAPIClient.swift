@@ -11,6 +11,8 @@ actor CursorAPIClient {
     private static let usageURL = URL(string: "https://www.cursor.com/api/usage")!
     private static let usageSummaryURL = URL(string: "https://www.cursor.com/api/usage-summary")!
     private static let userInfoURL = URL(string: "https://www.cursor.com/api/auth/me")!
+    private static let teamsURL = URL(string: "https://www.cursor.com/api/dashboard/teams")!
+    private static let weeklyUsageBase = "https://www.cursor.com/api/v2/analytics/team/usage"
 
     private let session: URLSession
 
@@ -40,8 +42,37 @@ actor CursorAPIClient {
         return try JSONDecoder().decode(UserInfoResponse.self, from: data)
     }
 
-    private func performRequest(url: URL, cookieHeader: String) async throws -> Data {
+    /// Lists teams the account belongs to. Used solely to discover a `teamId`
+    /// for the analytics endpoint — required on enterprise accounts and
+    /// expected to fail (non-200 or empty) on personal plans.
+    func fetchTeams(cookieHeader: String) async throws -> TeamsResponse {
+        let data = try await performRequest(url: Self.teamsURL, cookieHeader: cookieHeader)
+        return try JSONDecoder().decode(TeamsResponse.self, from: data)
+    }
+
+    /// Fetches per-day usage rows for the given window. `startDate` / `endDate`
+    /// are inclusive UTC dates formatted `YYYY-MM-DD`.
+    func fetchWeeklyUsage(
+        cookieHeader: String,
+        teamId: Int,
+        user: String,
+        startDate: String,
+        endDate: String
+    ) async throws -> WeeklyUsageResponse {
+        var comps = URLComponents(string: Self.weeklyUsageBase)!
+        comps.queryItems = [
+            URLQueryItem(name: "startDate", value: startDate),
+            URLQueryItem(name: "endDate", value: endDate),
+            URLQueryItem(name: "teamId", value: String(teamId)),
+            URLQueryItem(name: "user", value: user),
+        ]
+        let data = try await performRequest(url: comps.url!, cookieHeader: cookieHeader)
+        return try JSONDecoder().decode(WeeklyUsageResponse.self, from: data)
+    }
+
+    private func performRequest(url: URL, cookieHeader: String, method: String = "GET") async throws -> Data {
         var request = URLRequest(url: url)
+        request.httpMethod = method
         request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
         request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
 

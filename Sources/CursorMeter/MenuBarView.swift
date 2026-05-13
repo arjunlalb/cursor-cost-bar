@@ -10,6 +10,11 @@ final class MenuBarPopoverViewController: NSViewController {
     private let onLogin: () -> Void
     private let onSettings: () -> Void
 
+    /// Set by the owner so we can push a new size to the live NSPopover frame.
+    /// `preferredContentSize` alone is not enough — popover only consults it on
+    /// the first `show`, so toggles after that leave a stale frame behind.
+    var onContentSizeChange: ((NSSize) -> Void)?
+
     // MARK: - Root layout
 
     private let rootStack = NSStackView()
@@ -39,6 +44,12 @@ final class MenuBarPopoverViewController: NSViewController {
     private let onDemandRow      = NSStackView()
     private let onDemandKey      = NSTextField(labelWithString: "On-demand")
     private let onDemandValue    = NSTextField(labelWithString: "")
+
+    // Weekly chart (enterprise teams only)
+    private let weeklyChartContainer = NSView()
+    private let weeklyChartView = WeeklyUsageChartView(frame: .zero)
+    private var weeklyChartHeightConstraint: NSLayoutConstraint!
+    private var weeklyChartTopConstraint: NSLayoutConstraint!
 
     // Reset + interval row
     private let resetLabel       = NSTextField(labelWithString: "")
@@ -105,6 +116,24 @@ final class MenuBarPopoverViewController: NSViewController {
 
         // Login / Logout button title
         updateAuthRow()
+
+        // NSPopover pins the root view to the host frame, so `view.fittingSize`
+        // can stay inflated after a row collapses. Measure the internal stack
+        // instead (which is not pinned) and add the fixed outer padding.
+        // Sync now, then re-publish on the next run loop tick to catch
+        // layouts NSStackView defers after a constraint constant change.
+        view.layoutSubtreeIfNeeded()
+        publishCurrentSize()
+        DispatchQueue.main.async { [weak self] in
+            self?.view.layoutSubtreeIfNeeded()
+            self?.publishCurrentSize()
+        }
+    }
+
+    private func publishCurrentSize() {
+        let size = NSSize(width: 260, height: ceil(rootStack.fittingSize.height + 12))
+        preferredContentSize = size
+        onContentSizeChange?(size)
     }
 
     // MARK: - Layout construction
@@ -259,6 +288,31 @@ final class MenuBarPopoverViewController: NSViewController {
 
         dataStack.addArrangedSubview(onDemandRow)
 
+        // --- Weekly chart (enterprise) ---
+        // The container stays in `dataStack` for its lifetime; toggling the
+        // height constraint to 0 (instead of detaching the view) sidesteps
+        // an NSStackView/AutoLayout quirk where `fittingSize` keeps caching
+        // the inflated value after `removeArrangedSubview`.
+        weeklyChartContainer.translatesAutoresizingMaskIntoConstraints = false
+        weeklyChartView.translatesAutoresizingMaskIntoConstraints = false
+        weeklyChartContainer.addSubview(weeklyChartView)
+        weeklyChartTopConstraint = weeklyChartView.topAnchor.constraint(equalTo: weeklyChartContainer.topAnchor, constant: 4)
+        weeklyChartHeightConstraint = weeklyChartContainer.heightAnchor.constraint(equalToConstant: 76)
+        NSLayoutConstraint.activate([
+            weeklyChartTopConstraint,
+            weeklyChartView.bottomAnchor.constraint(equalTo: weeklyChartContainer.bottomAnchor),
+            weeklyChartView.leadingAnchor.constraint(equalTo: weeklyChartContainer.leadingAnchor),
+            weeklyChartView.trailingAnchor.constraint(equalTo: weeklyChartContainer.trailingAnchor),
+            weeklyChartHeightConstraint,
+        ])
+        weeklyChartContainer.clipsToBounds = true
+        dataStack.addArrangedSubview(weeklyChartContainer)
+
+        // Default to collapsed; applyData decides visibility per refresh.
+        weeklyChartHeightConstraint.constant = 0
+        weeklyChartTopConstraint.constant = 0
+        weeklyChartView.isHidden = true
+
         // --- Reset date + interval ---
         let bottomRow = NSStackView()
         bottomRow.orientation = .horizontal
@@ -396,11 +450,36 @@ final class MenuBarPopoverViewController: NSViewController {
             onDemandRow.isHidden = true
         }
 
+        // Weekly chart (enterprise + master toggle gate).
+        if viewModel.weeklyChartEnabled,
+           viewModel.isEnterpriseTeam,
+           let weekly = viewModel.weeklyData, weekly.count == 7
+        {
+            weeklyChartView.update(
+                days: weekly,
+                dailyBudget: data.dailyRequestBudget,
+                style: viewModel.weeklyChartStyle
+            )
+            setWeeklyChartVisible(true)
+        } else {
+            setWeeklyChartVisible(false)
+        }
+
         // Reset
         resetLabel.stringValue = data.resetText ?? ""
 
         // Interval popup
         syncIntervalPopUp()
+    }
+
+    private func setWeeklyChartVisible(_ visible: Bool) {
+        weeklyChartHeightConstraint.constant = visible ? 76 : 0
+        weeklyChartTopConstraint.constant = visible ? 4 : 0
+        weeklyChartView.isHidden = !visible
+        weeklyChartContainer.invalidateIntrinsicContentSize()
+        dataStack.needsLayout = true
+        rootStack.needsLayout = true
+        view.needsLayout = true
     }
 
     private func applyStatus() {

@@ -23,6 +23,10 @@ final class SettingsViewController: NSViewController {
     private var jumpEffectToggle = NSButton()
     private var jumpIntensitySegmented = NSSegmentedControl()
     private var jumpIntensityRow = NSView()
+    private var weeklyChartSection = NSView()
+    private var weeklyChartToggle = NSSwitch()
+    private var weeklyChartStyleSegmented = NSSegmentedControl()
+    private var weeklyChartStyleRow = NSView()
     private var launchAtLoginToggle = NSButton()
 
     // Updates row controls
@@ -93,6 +97,11 @@ final class SettingsViewController: NSViewController {
         outerStack.addArrangedSubview(makeJumpEffectSection())
         outerStack.setCustomSpacing(10, after: outerStack.arrangedSubviews.last!)
 
+        // Section: Weekly Chart (enterprise team only — visibility set in updateUI)
+        weeklyChartSection = makeWeeklyChartSection()
+        outerStack.addArrangedSubview(weeklyChartSection)
+        outerStack.setCustomSpacing(10, after: outerStack.arrangedSubviews.last!)
+
         outerStack.addArrangedSubview(makeSeparator())
         outerStack.setCustomSpacing(10, after: outerStack.arrangedSubviews.last!)
 
@@ -155,6 +164,12 @@ final class SettingsViewController: NSViewController {
         jumpEffectToggle.state = viewModel.jumpEffectEnabled ? .on : .off
         jumpIntensitySegmented.selectedSegment = viewModel.jumpIntensity.rawValue
         jumpIntensityRow.isHidden = !viewModel.jumpEffectEnabled
+
+        // Weekly chart — visible only on enterprise team accounts
+        weeklyChartSection.isHidden = !viewModel.isEnterpriseTeam
+        weeklyChartToggle.state = viewModel.weeklyChartEnabled ? .on : .off
+        weeklyChartStyleSegmented.selectedSegment = viewModel.weeklyChartStyle.rawValue
+        weeklyChartStyleSegmented.isEnabled = viewModel.weeklyChartEnabled
 
         // Launch at login
         launchAtLoginToggle.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -275,6 +290,56 @@ final class SettingsViewController: NSViewController {
         stack.orientation = .vertical
         stack.alignment = .left
         stack.spacing = 6
+        return stack
+    }
+
+    private func makeWeeklyChartSection() -> NSView {
+        weeklyChartToggle = NSSwitch()
+        weeklyChartToggle.target = self
+        weeklyChartToggle.action = #selector(weeklyChartToggleChanged)
+        weeklyChartToggle.state = viewModel.weeklyChartEnabled ? .on : .off
+
+        let toggleLabel = makeLabel("Show weekly chart")
+        let toggleRow = NSStackView(views: [toggleLabel, makeSpacer(), weeklyChartToggle])
+        toggleRow.orientation = .horizontal
+        toggleRow.spacing = 8
+        toggleRow.alignment = .centerY
+
+        weeklyChartStyleSegmented = NSSegmentedControl(
+            labels: ["Outline", "Dim", "Both"],
+            trackingMode: .selectOne,
+            target: self,
+            action: #selector(weeklyChartStyleChanged)
+        )
+        weeklyChartStyleSegmented.selectedSegment = viewModel.weeklyChartStyle.rawValue
+        weeklyChartStyleSegmented.translatesAutoresizingMaskIntoConstraints = false
+
+        let styleLabel = makeLabel("Today")
+        let styleRow = NSStackView(views: [styleLabel, weeklyChartStyleSegmented, makeSpacer()])
+        styleRow.orientation = .horizontal
+        styleRow.spacing = 8
+        styleRow.alignment = .centerY
+        weeklyChartStyleRow = styleRow
+
+        let description = makeLabel("Rolling 7-day usage. Enterprise team accounts only.")
+        description.textColor = .secondaryLabelColor
+        description.font = NSFont.systemFont(ofSize: 11)
+
+        let header = makeSectionHeader("Weekly Chart")
+        let separatorAbove = makeSeparator()
+
+        let stack = NSStackView(views: [
+            separatorAbove,
+            header,
+            toggleRow,
+            weeklyChartStyleRow,
+            description,
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .left
+        stack.spacing = 6
+        stack.setCustomSpacing(10, after: separatorAbove)
+        stack.setCustomSpacing(6, after: header)
         return stack
     }
 
@@ -405,6 +470,18 @@ final class SettingsViewController: NSViewController {
         let raw = jumpIntensitySegmented.selectedSegment
         guard let intensity = JumpIntensity(rawValue: raw) else { return }
         viewModel.setJumpIntensity(intensity)
+    }
+
+    @objc private func weeklyChartToggleChanged() {
+        let enabled = weeklyChartToggle.state == .on
+        viewModel.setWeeklyChartEnabled(enabled)
+        weeklyChartStyleSegmented.isEnabled = enabled
+    }
+
+    @objc private func weeklyChartStyleChanged() {
+        let raw = weeklyChartStyleSegmented.selectedSegment
+        guard let style = WeeklyChartStyle(rawValue: raw) else { return }
+        viewModel.setWeeklyChartStyle(style)
     }
 
     @objc private func launchAtLoginChanged() {

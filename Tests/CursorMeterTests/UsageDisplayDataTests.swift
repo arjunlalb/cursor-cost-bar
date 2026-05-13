@@ -349,6 +349,7 @@ final class UsageDisplayDataTests: XCTestCase {
             requestsLimit: limit,
             onDemandUsedCents: nil,
             onDemandLimitCents: nil,
+            cycleStartDate: nil,
             resetDate: nil,
             daysUntilReset: daysUntilReset
         )
@@ -402,7 +403,7 @@ final class UsageDisplayDataTests: XCTestCase {
             planUsedCents: nil, planLimitCents: nil, serverPercentUsed: 5.5,
             requestsUsed: 0, requestsLimit: 0,
             onDemandUsedCents: nil, onDemandLimitCents: nil,
-            resetDate: nil, daysUntilReset: 5
+            cycleStartDate: nil, resetDate: nil, daysUntilReset: 5
         )
         XCTAssertTrue(data.isPercentOnly)
         XCTAssertEqual(data.percentUsed, 5.5, accuracy: 0.01)
@@ -478,6 +479,7 @@ final class UsageDisplayDataTests: XCTestCase {
             requestsLimit: 0,
             onDemandUsedCents: nil,
             onDemandLimitCents: nil,
+            cycleStartDate: nil,
             resetDate: nil,
             daysUntilReset: daysUntilReset
         )
