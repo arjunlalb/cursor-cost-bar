@@ -36,7 +36,7 @@ The login WebView is the only place CursorMeter loads third-party origins. Every
 
 ## WebView Whitelist Policy
 
-The login WebView (`LoginWindow.swift`) validates every navigation against a two-tier host whitelist. The same check runs in both `decidePolicyFor navigationAction` and `decidePolicyFor navigationResponse`.
+The login WebView (`LoginWindow.swift`) validates every navigation against a two-tier host whitelist. The same check runs in both `decidePolicyFor navigationAction` and `decidePolicyFor navigationResponse`. Both callbacks also enforce `scheme == "https"` — a redirect to plain HTTP (or to `file:`/`javascript:`/`data:`) is rejected even when the host is on the whitelist.
 
 ### Tier 1 — exact host match
 

@@ -211,4 +211,33 @@ final class DomainWhitelistTests: XCTestCase {
         // "stripe.com" is NOT in the exact set
         XCTAssertFalse(LoginWindow.isAllowedHost("stripe.com"))
     }
+
+    // MARK: - Scheme Enforcement (isAllowedURL)
+
+    @MainActor
+    func testAllowsHttpsWithWhitelistedHost() {
+        XCTAssertTrue(LoginWindow.isAllowedURL(URL(string: "https://accounts.google.com/signin")))
+    }
+
+    @MainActor
+    func testRejectsHttpEvenForWhitelistedHost() {
+        XCTAssertFalse(LoginWindow.isAllowedURL(URL(string: "http://accounts.google.com/signin")))
+    }
+
+    @MainActor
+    func testRejectsNonHttpsSchemes() {
+        XCTAssertFalse(LoginWindow.isAllowedURL(URL(string: "file:///etc/passwd")))
+        XCTAssertFalse(LoginWindow.isAllowedURL(URL(string: "javascript:alert(1)")))
+        XCTAssertFalse(LoginWindow.isAllowedURL(URL(string: "data:text/html,<script>")))
+    }
+
+    @MainActor
+    func testRejectsHttpsWithDisallowedHost() {
+        XCTAssertFalse(LoginWindow.isAllowedURL(URL(string: "https://evil.example.com/login")))
+    }
+
+    @MainActor
+    func testRejectsNilURL() {
+        XCTAssertFalse(LoginWindow.isAllowedURL(nil))
+    }
 }

@@ -69,6 +69,16 @@ final class LoginWindow: NSObject {
         return allowedSuffixes.contains { h.hasSuffix($0) }
     }
 
+    /// Combined scheme + host gate. Both navigation callbacks route through
+    /// this so a redirect that downgrades to plain HTTP is rejected even when
+    /// the host is on the whitelist.
+    nonisolated static func isAllowedURL(_ url: URL?) -> Bool {
+        guard let url, url.scheme?.lowercased() == "https",
+              let host = url.host, isAllowedHost(host)
+        else { return false }
+        return true
+    }
+
     // Cookie names that must be present before we treat a Cursor login as
     // successful. Without this check, a partial cookie write (CSRF/analytics
     // cookies arriving before the auth cookie) would yield an empty session
@@ -186,15 +196,11 @@ extension LoginWindow: WKNavigationDelegate {
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
     ) {
-        guard let url = navigationAction.request.url, let host = url.host else {
-            decisionHandler(.cancel)
-            return
-        }
-
-        if Self.isAllowedHost(host) {
+        let url = navigationAction.request.url
+        if Self.isAllowedURL(url) {
             decisionHandler(.allow)
         } else {
-            Log.info("Blocked navigation to: \(host)")
+            Log.info("Blocked navigation: \(url?.scheme ?? "nil")://\(url?.host ?? "nil")")
             decisionHandler(.cancel)
         }
     }
@@ -206,15 +212,15 @@ extension LoginWindow: WKNavigationDelegate {
     ) {
         // Defense-in-depth: WKWebView re-triggers navigationAction for each
         // redirect step today, but the contract is not stable. Validate the
-        // response host as well so a 302 that bypasses the action delegate
-        // cannot deliver content.
-        guard let host = navigationResponse.response.url?.host,
-              Self.isAllowedHost(host) else {
-            Log.info("Blocked response from: \(navigationResponse.response.url?.host ?? "nil")")
+        // response URL as well so a 302 that bypasses the action delegate
+        // (or downgrades to plain HTTP) cannot deliver content.
+        let url = navigationResponse.response.url
+        if Self.isAllowedURL(url) {
+            decisionHandler(.allow)
+        } else {
+            Log.info("Blocked response: \(url?.scheme ?? "nil")://\(url?.host ?? "nil")")
             decisionHandler(.cancel)
-            return
         }
-        decisionHandler(.allow)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
