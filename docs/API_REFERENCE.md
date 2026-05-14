@@ -52,6 +52,20 @@ Response (excerpt):
 
 The `?user=<sub>` query parameter takes the `sub` returned by `/api/auth/me`.
 
+### `GET /api/dashboard/teams`
+
+Sole source of `teamId` for the analytics endpoints. Used by `CursorAPIClient.fetchTeams` to discover the active team once per session (cached afterwards). Response:
+
+```json
+{ "teams": [{ "id": 13403082, "name": "..." }] }
+```
+
+`GET`, no body. Empty / non-200 on personal plans → CursorMeter treats the account as non-enterprise and hides the weekly chart.
+
+### `GET /api/v2/analytics/team/usage`
+
+Per-day breakdown of request usage. Used by the weekly bar graph (enterprise team accounts only). See "Endpoints observed" below for the full response shape.
+
 ## Endpoints observed (not yet used)
 
 ### `GET /api/v2/analytics/team/usage`
