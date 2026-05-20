@@ -40,10 +40,11 @@ final class MenuBarPopoverViewController: NSViewController {
     private let progressBar      = ColoredProgressBar()
     private let percentLabel     = NSTextField(labelWithString: "")
 
-    // On-demand row (hidden when nil)
-    private let onDemandRow      = NSStackView()
-    private let onDemandKey      = NSTextField(labelWithString: "On-demand")
-    private let onDemandValue    = NSTextField(labelWithString: "")
+    // Secondary metric row (hidden when no secondary data). In normal mode shows
+    // On-demand; in on-demand mode shows the previous primary (Requests or Plan).
+    private let secondaryRow      = NSStackView()
+    private let secondaryKey      = NSTextField(labelWithString: "")
+    private let secondaryValue    = NSTextField(labelWithString: "")
 
     // Weekly chart (enterprise teams only). `lazy var` so a user who never
     // opens the popover (or who's on a non-enterprise account) doesn't pay
@@ -272,23 +273,23 @@ final class MenuBarPopoverViewController: NSViewController {
 
         dataStack.addArrangedSubview(progressRow)
 
-        // --- On-demand row ---
-        onDemandRow.orientation = .horizontal
-        onDemandRow.spacing = 4
-        onDemandRow.translatesAutoresizingMaskIntoConstraints = false
+        // --- Secondary metric row ---
+        secondaryRow.orientation = .horizontal
+        secondaryRow.spacing = 4
+        secondaryRow.translatesAutoresizingMaskIntoConstraints = false
 
-        onDemandKey.font      = NSFont.systemFont(ofSize: 12, weight: .regular)
-        onDemandKey.textColor = NSColor.secondaryLabelColor
+        secondaryKey.font      = NSFont.systemFont(ofSize: 12, weight: .regular)
+        secondaryKey.textColor = NSColor.secondaryLabelColor
 
-        onDemandValue.font      = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-        onDemandValue.textColor = NSColor.secondaryLabelColor
+        secondaryValue.font      = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        secondaryValue.textColor = NSColor.secondaryLabelColor
 
         let spacer3 = makeFlexibleSpacer()
-        onDemandRow.addArrangedSubview(onDemandKey)
-        onDemandRow.addArrangedSubview(spacer3)
-        onDemandRow.addArrangedSubview(onDemandValue)
+        secondaryRow.addArrangedSubview(secondaryKey)
+        secondaryRow.addArrangedSubview(spacer3)
+        secondaryRow.addArrangedSubview(secondaryValue)
 
-        dataStack.addArrangedSubview(onDemandRow)
+        dataStack.addArrangedSubview(secondaryRow)
 
         // --- Weekly chart (enterprise) ---
         // The container stays in `dataStack` for its lifetime; toggling the
@@ -444,12 +445,18 @@ final class MenuBarPopoverViewController: NSViewController {
         progressBar.barColor = CircularProgressIcon.tokenColor(for: data.percentUsed)
         percentLabel.stringValue = data.percentText
 
-        // On-demand
-        if let text = data.onDemandText {
-            onDemandValue.stringValue = text
-            onDemandRow.isHidden      = false
+        // Secondary metric row (label + value vary by mode — see UsageDisplayData)
+        if let label = data.secondaryUsageLabel, let value = data.secondaryUsageValue {
+            secondaryKey.stringValue   = label
+            secondaryValue.stringValue = value
+            // Highlight over-limit values in red so the user immediately notices
+            // the previous-primary dimension is exceeded while in on-demand mode.
+            secondaryValue.textColor = data.secondaryUsageIsOverLimit
+                ? NSColor.systemRed
+                : NSColor.secondaryLabelColor
+            secondaryRow.isHidden = false
         } else {
-            onDemandRow.isHidden = true
+            secondaryRow.isHidden = true
         }
 
         // Weekly chart (enterprise + master toggle gate).
