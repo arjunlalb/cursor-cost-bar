@@ -237,6 +237,38 @@ struct UsageDisplayData: Sendable {
         return "\(Self.formatUSD(used)) / \(Self.formatUSD(limit))"
     }
 
+    // MARK: - Secondary popover row (inverted display when on-demand active)
+
+    /// In on-demand mode this is the previous primary (Requests or Plan);
+    /// in normal mode this is On-demand (when present).
+    var secondaryUsageLabel: String? {
+        if isOnDemandActive {
+            if isCreditBased { return "Plan" }
+            return "Requests"
+        }
+        return hasOnDemand ? "On-demand" : nil
+    }
+
+    var secondaryUsageValue: String? {
+        if isOnDemandActive {
+            if isCreditBased {
+                return "\(Self.formatUSD(planUsedCents ?? 0)) / \(Self.formatUSD(planLimitCents ?? 0))"
+            }
+            return "\(requestsUsed) / \(requestsLimit)"
+        }
+        return onDemandText
+    }
+
+    var secondaryUsageIsOverLimit: Bool {
+        if isOnDemandActive {
+            if isCreditBased,
+               let limit = planLimitCents, limit > 0,
+               let used = planUsedCents { return used >= limit }
+            return requestsLimit > 0 && requestsUsed >= requestsLimit
+        }
+        return false
+    }
+
     private static func formatUSD(_ cents: Int) -> String {
         String(format: "$%.2f", Double(cents) / 100.0)
     }

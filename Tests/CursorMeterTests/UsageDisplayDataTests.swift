@@ -629,6 +629,48 @@ final class UsageDisplayDataTests: XCTestCase {
         XCTAssertEqual(active.onDemandUsedCents, base.onDemandUsedCents)
     }
 
+    // MARK: - Secondary row computeds (inverted display in on-demand mode)
+
+    func test_secondaryRow_onDemandMode_showsRequests() {
+        let data = makeOnDemandData(
+            requestsUsed: 757, requestsLimit: 500,
+            onDemandUsedCents: 584, onDemandLimitCents: 4000,
+            onDemandEnabled: true, isOnDemandActive: true)
+        XCTAssertEqual(data.secondaryUsageLabel, "Requests")
+        XCTAssertEqual(data.secondaryUsageValue, "757 / 500")
+        XCTAssertTrue(data.secondaryUsageIsOverLimit)
+    }
+
+    func test_secondaryRow_onDemandMode_showsPlan_whenCreditBased() {
+        let data = makeOnDemandData(
+            planUsedCents: 2000, planLimitCents: 2000,
+            requestsUsed: 0, requestsLimit: 0,
+            onDemandUsedCents: 0, onDemandLimitCents: 4000,
+            onDemandEnabled: true, isOnDemandActive: true)
+        XCTAssertEqual(data.secondaryUsageLabel, "Plan")
+        XCTAssertEqual(data.secondaryUsageValue, "$20.00 / $20.00")
+        XCTAssertTrue(data.secondaryUsageIsOverLimit)
+    }
+
+    func test_secondaryRow_requestMode_showsOnDemand() {
+        let data = makeOnDemandData(
+            requestsUsed: 200, requestsLimit: 500,
+            onDemandUsedCents: 0, onDemandLimitCents: 4000,
+            onDemandEnabled: true, isOnDemandActive: false)
+        XCTAssertEqual(data.secondaryUsageLabel, "On-demand")
+        XCTAssertEqual(data.secondaryUsageValue, "$0.00 / $40.00")
+        XCTAssertFalse(data.secondaryUsageIsOverLimit)
+    }
+
+    func test_secondaryRow_requestMode_nil_whenNoOnDemand() {
+        let data = makeOnDemandData(
+            requestsUsed: 200, requestsLimit: 500,
+            onDemandUsedCents: nil, onDemandLimitCents: nil,
+            onDemandEnabled: nil, isOnDemandActive: false)
+        XCTAssertNil(data.secondaryUsageLabel)
+        XCTAssertNil(data.secondaryUsageValue)
+    }
+
     // MARK: - teamUsage.onDemand fallback (Enterprise team members)
 
     func test_teamUsage_onDemand_populatesDisplayData() {
