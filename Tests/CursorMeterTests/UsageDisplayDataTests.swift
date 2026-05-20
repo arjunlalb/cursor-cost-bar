@@ -504,6 +504,39 @@ final class UsageDisplayDataTests: XCTestCase {
         XCTAssertTrue(data.hasOnDemand)
     }
 
+    // MARK: - teamUsage.onDemand fallback (Enterprise team members)
+
+    func test_teamUsage_onDemand_populatesDisplayData() {
+        let summary = UsageSummaryResponse(
+            billingCycleStart: "2026-05-01T00:00:00.000Z",
+            billingCycleEnd: "2026-06-01T00:00:00.000Z",
+            membershipType: "enterprise",
+            limitType: nil,
+            isUnlimited: false,
+            individualUsage: IndividualUsage(plan: nil, onDemand: nil),
+            teamUsage: TeamUsage(onDemand: OnDemandUsage(
+                enabled: true, used: 584, limit: 4000, remaining: 3416))
+        )
+        let usage = UsageResponse(
+            models: ["gpt-4": ModelUsage(
+                numRequests: 757,
+                numRequestsTotal: 757,
+                numTokens: nil,
+                maxRequestUsage: 500,
+                maxTokenUsage: nil
+            )],
+            startOfMonth: "2026-05-01T00:00:00.000Z"
+        )
+        let userInfo = UserInfoResponse(email: "test@example.com", name: "Test")
+
+        let data = UsageDisplayData.from(summary: summary, usage: usage, userInfo: userInfo)
+
+        XCTAssertEqual(data.onDemandUsedCents, 584)
+        XCTAssertEqual(data.onDemandLimitCents, 4000)
+        XCTAssertEqual(data.onDemandEnabled, true)
+        XCTAssertTrue(data.hasOnDemand)
+    }
+
     // MARK: - Helpers
 
     private func makeCreditData(

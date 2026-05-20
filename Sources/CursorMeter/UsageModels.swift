@@ -249,6 +249,7 @@ struct UsageDisplayData: Sendable {
         let resetDate = parseDate(summary.billingCycleEnd)
         let plan = summary.individualUsage?.plan
         let onDemand = summary.individualUsage?.onDemand
+            ?? summary.teamUsage?.onDemand
 
         return UsageDisplayData(
             email: userInfo.email ?? "Unknown",
