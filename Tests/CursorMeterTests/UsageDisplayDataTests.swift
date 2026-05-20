@@ -349,6 +349,7 @@ final class UsageDisplayDataTests: XCTestCase {
             requestsLimit: limit,
             onDemandUsedCents: nil,
             onDemandLimitCents: nil,
+            onDemandEnabled: nil,
             cycleStartDate: nil,
             resetDate: nil,
             daysUntilReset: daysUntilReset
@@ -403,6 +404,7 @@ final class UsageDisplayDataTests: XCTestCase {
             planUsedCents: nil, planLimitCents: nil, serverPercentUsed: 5.5,
             requestsUsed: 0, requestsLimit: 0,
             onDemandUsedCents: nil, onDemandLimitCents: nil,
+            onDemandEnabled: nil,
             cycleStartDate: nil, resetDate: nil, daysUntilReset: 5
         )
         XCTAssertTrue(data.isPercentOnly)
@@ -460,6 +462,48 @@ final class UsageDisplayDataTests: XCTestCase {
         XCTAssertEqual(data.menuBarLimitText, "")
     }
 
+    // MARK: - hasOnDemand (OnDemandUsage.enabled plumbing)
+
+    func test_hasOnDemand_falseWhenEnabledFalse() {
+        let data = UsageDisplayData(
+            email: "test@test.com",
+            name: "Test",
+            membershipType: "pro",
+            planUsedCents: 5000,
+            planLimitCents: 5000,
+            serverPercentUsed: nil,
+            requestsUsed: 0,
+            requestsLimit: 0,
+            onDemandUsedCents: 0,
+            onDemandLimitCents: 4000,
+            onDemandEnabled: false,
+            cycleStartDate: nil,
+            resetDate: nil,
+            daysUntilReset: 5
+        )
+        XCTAssertFalse(data.hasOnDemand)
+    }
+
+    func test_hasOnDemand_trueWhenEnabledNil() {
+        let data = UsageDisplayData(
+            email: "test@test.com",
+            name: "Test",
+            membershipType: "pro",
+            planUsedCents: 5000,
+            planLimitCents: 5000,
+            serverPercentUsed: nil,
+            requestsUsed: 0,
+            requestsLimit: 0,
+            onDemandUsedCents: 0,
+            onDemandLimitCents: 4000,
+            onDemandEnabled: nil,
+            cycleStartDate: nil,
+            resetDate: nil,
+            daysUntilReset: 5
+        )
+        XCTAssertTrue(data.hasOnDemand)
+    }
+
     // MARK: - Helpers
 
     private func makeCreditData(
@@ -479,6 +523,7 @@ final class UsageDisplayDataTests: XCTestCase {
             requestsLimit: 0,
             onDemandUsedCents: nil,
             onDemandLimitCents: nil,
+            onDemandEnabled: nil,
             cycleStartDate: nil,
             resetDate: nil,
             daysUntilReset: daysUntilReset

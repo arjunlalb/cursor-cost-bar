@@ -115,6 +115,7 @@ struct UsageDisplayData: Sendable {
 
     let onDemandUsedCents: Int?
     let onDemandLimitCents: Int?
+    let onDemandEnabled: Bool?
     let cycleStartDate: Date?
     let resetDate: Date?
     let daysUntilReset: Int?
@@ -173,7 +174,11 @@ struct UsageDisplayData: Sendable {
     }
 
     var hasOnDemand: Bool {
-        onDemandLimitCents != nil && onDemandLimitCents! > 0
+        guard let limit = onDemandLimitCents, limit > 0 else { return false }
+        // `enabled == false` means the team admin disabled on-demand mid-cycle;
+        // treat as no on-demand even if a residual `used` value is reported.
+        // `nil` (field absent) defaults to true for backward compat.
+        return onDemandEnabled ?? true
     }
 
     var onDemandText: String? {
@@ -256,6 +261,7 @@ struct UsageDisplayData: Sendable {
             requestsLimit: isRequestBased ? (model?.maxRequestUsage ?? 0) : 0,
             onDemandUsedCents: onDemand?.used,
             onDemandLimitCents: onDemand?.limit,
+            onDemandEnabled: onDemand?.enabled,
             cycleStartDate: parseDate(summary.billingCycleStart),
             resetDate: resetDate,
             daysUntilReset: daysUntilReset(to: resetDate)
@@ -281,6 +287,7 @@ struct UsageDisplayData: Sendable {
             requestsLimit: model?.maxRequestUsage ?? 0,
             onDemandUsedCents: nil,
             onDemandLimitCents: nil,
+            onDemandEnabled: nil,
             cycleStartDate: nil,
             resetDate: resetDate,
             daysUntilReset: daysUntilReset(to: resetDate)

@@ -147,6 +147,7 @@ final class WeeklyUsageTests: XCTestCase {
             requestsUsed: 0,
             requestsLimit: requestsLimit,
             onDemandUsedCents: nil, onDemandLimitCents: nil,
+            onDemandEnabled: nil,
             cycleStartDate: cycleStart.map { date($0) },
             resetDate: cycleEnd.map { date($0) },
             daysUntilReset: nil
