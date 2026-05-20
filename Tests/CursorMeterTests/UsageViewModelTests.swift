@@ -91,6 +91,25 @@ final class UsageViewModelTests: XCTestCase {
         XCTAssertEqual(vm.usageData?.isOnDemandActive, true)
         XCTAssertEqual(vm.testHook_notifiedThresholds(), [80, 90])
     }
+
+    @MainActor
+    func test_latch_resetsOnLogout() async {
+        let vm = UsageViewModel()
+        let base = makeFixture(
+            requestsUsed: 600, requestsLimit: 500,
+            onDemandUsedCents: 100, onDemandLimitCents: 4000, onDemandEnabled: true)
+        vm.testHook_applyLatch(base: base)
+        XCTAssertEqual(vm.usageData?.isOnDemandActive, true)
+
+        vm.logout()
+
+        // Re-apply a below-quota fixture; latch must NOT carry over
+        let fresh = makeFixture(
+            requestsUsed: 50, requestsLimit: 500,
+            onDemandUsedCents: 0, onDemandLimitCents: 4000, onDemandEnabled: true)
+        vm.testHook_applyLatch(base: fresh)
+        XCTAssertEqual(vm.usageData?.isOnDemandActive, false)
+    }
 }
 
 // MARK: - Test fixture

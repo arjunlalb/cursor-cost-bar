@@ -488,6 +488,7 @@ final class UsageViewModel {
         isEnterpriseTeam = false
         cachedTeamId = nil
         previousCycleStart = nil
+        isOnDemandLatched = false
         // Cancel any pending offline retry so it can't fire ~60s after logout
         // and clobber the cleared auth state with a 401.
         networkRetryTask?.cancel()
