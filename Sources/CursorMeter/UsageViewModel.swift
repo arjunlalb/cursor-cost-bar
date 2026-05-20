@@ -292,7 +292,8 @@ final class UsageViewModel {
             if let newStart = usageData?.cycleStartDate, newStart != previousCycleStart {
                 if previousCycleStart != nil {
                     notificationManager.resetNotifications()
-                    Log.info("Billing cycle rollover detected — threshold notifications reset")
+                    isOnDemandLatched = false
+                    Log.info("Billing cycle rollover — reset notification dedup + on-demand latch")
                 }
                 previousCycleStart = newStart
             }
@@ -713,6 +714,24 @@ final class UsageViewModel {
     /// Test-only entry to mirror `refresh()`'s latch + injection step.
     /// Not for production code — `refresh()` is the legitimate caller.
     internal func testHook_applyLatch(base: UsageDisplayData) {
+        if !isOnDemandLatched && base.wouldActivateOnDemand {
+            isOnDemandLatched = true
+            notificationManager.resetNotifications()
+        }
+        usageData = base.withOnDemandActive(isOnDemandLatched)
+    }
+
+    /// Test-only entry that mirrors `refresh()`'s rollover detection followed by
+    /// the latch update. Lets tests verify both transitions in sequence without
+    /// driving the full refresh pipeline.
+    internal func testHook_applyLatchAndRollover(base: UsageDisplayData) {
+        if let newStart = base.cycleStartDate, newStart != previousCycleStart {
+            if previousCycleStart != nil {
+                notificationManager.resetNotifications()
+                isOnDemandLatched = false
+            }
+            previousCycleStart = newStart
+        }
         if !isOnDemandLatched && base.wouldActivateOnDemand {
             isOnDemandLatched = true
             notificationManager.resetNotifications()
