@@ -56,6 +56,7 @@ struct JumpEvent: Sendable, Equatable {
         case credit       // USD cents
         case request      // request count
         case percent      // server-provided percent (%-points)
+        case onDemand     // USD cents (on-demand billing dimension)
     }
 
     let tier: Tier
@@ -137,6 +138,7 @@ final class UsageViewModel {
     private var previousPlanUsedCents: Int?
     private var previousRequestsUsed: Int?
     private var previousServerPercent: Double?
+    private var previousOnDemandUsedCents: Int?
     private var previousMode: JumpEvent.Mode?
 
     /// Discovered team id, cached after the first successful teams fetch.
@@ -199,6 +201,7 @@ final class UsageViewModel {
         previousPlanUsedCents = nil
         previousRequestsUsed = nil
         previousServerPercent = nil
+        previousOnDemandUsedCents = nil
         previousMode = nil
         lastJump = nil
         notificationManager.resetNotifications()
@@ -618,7 +621,10 @@ final class UsageViewModel {
     private func updateJumpState(from data: UsageDisplayData) {
         let mode: JumpEvent.Mode
         let current: Double
-        if data.isPercentOnly {
+        if data.isOnDemandActive {
+            mode = .onDemand
+            current = Double(data.onDemandUsedCents ?? 0)
+        } else if data.isPercentOnly {
             mode = .percent
             current = data.serverPercentUsed ?? 0
         } else if data.isCreditBased {
@@ -631,9 +637,10 @@ final class UsageViewModel {
 
         let previous: Double? = {
             switch mode {
-            case .credit:  return previousPlanUsedCents.map(Double.init)
-            case .request: return previousRequestsUsed.map(Double.init)
-            case .percent: return previousServerPercent
+            case .credit:   return previousPlanUsedCents.map(Double.init)
+            case .request:  return previousRequestsUsed.map(Double.init)
+            case .percent:  return previousServerPercent
+            case .onDemand: return previousOnDemandUsedCents.map(Double.init)
             }
         }()
 
@@ -641,9 +648,10 @@ final class UsageViewModel {
 
         // Always update the baseline for the active mode.
         switch mode {
-        case .credit:  previousPlanUsedCents = data.planUsedCents ?? 0
-        case .request: previousRequestsUsed = data.requestsUsed
-        case .percent: previousServerPercent = data.serverPercentUsed ?? 0
+        case .credit:   previousPlanUsedCents = data.planUsedCents ?? 0
+        case .request:  previousRequestsUsed = data.requestsUsed
+        case .percent:  previousServerPercent = data.serverPercentUsed ?? 0
+        case .onDemand: previousOnDemandUsedCents = data.onDemandUsedCents ?? 0
         }
         previousMode = mode
 
@@ -662,9 +670,10 @@ final class UsageViewModel {
 
         let limit: Double
         switch mode {
-        case .credit:  limit = Double(data.planLimitCents ?? 0)
-        case .request: limit = Double(data.requestsLimit)
-        case .percent: limit = 100  // percent-only: deltas are already %-points
+        case .credit:   limit = Double(data.planLimitCents ?? 0)
+        case .request:  limit = Double(data.requestsLimit)
+        case .percent:  limit = 100  // percent-only: deltas are already %-points
+        case .onDemand: limit = Double(data.onDemandLimitCents ?? 0)
         }
 
         let event = Self.makeJumpEvent(
@@ -674,6 +683,12 @@ final class UsageViewModel {
             timestamp: Date()
         )
         lastJump = event
+    }
+
+    /// Test-only entry point for `updateJumpState`. Not for production callers —
+    /// the regular `refresh()` path is the only legitimate caller in app code.
+    internal func testHook_updateJumpState(from data: UsageDisplayData) {
+        updateJumpState(from: data)
     }
 
     /// Builds a `JumpEvent` from raw delta/limit. Pure function — exposed for testing.
@@ -706,9 +721,10 @@ final class UsageViewModel {
         for mode: JumpEvent.Mode
     ) -> (t1: Double, t2: Double) {
         switch mode {
-        case .credit:  return (5, 30)   // cents — $0.05 / $0.30
-        case .request: return (5, 15)   // request count
-        case .percent: return (5, 15)   // %-points (mirrors percent-of-limit)
+        case .credit:   return (5, 30)   // cents — $0.05 / $0.30
+        case .onDemand: return (5, 30)   // cents — same scale as credit
+        case .request:  return (5, 15)   // request count
+        case .percent:  return (5, 15)   // %-points (mirrors percent-of-limit)
         }
     }
 
@@ -739,7 +755,7 @@ final class UsageViewModel {
     /// Formats a positive delta as a signed user-facing string for the active display mode.
     nonisolated static func formatJumpDelta(_ delta: Double, mode: JumpEvent.Mode) -> String {
         switch mode {
-        case .credit:
+        case .credit, .onDemand:
             return String(format: "+$%.2f", delta / 100.0)
         case .request:
             return "+\(Int(delta.rounded()))"

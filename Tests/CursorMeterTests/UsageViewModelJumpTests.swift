@@ -165,4 +165,91 @@ final class UsageViewModelJumpTests: XCTestCase {
         UserDefaults.standard.removeObject(forKey: "jumpEffectEnabled")
         UserDefaults.standard.removeObject(forKey: "jumpIntensity")
     }
+
+    // MARK: - On-demand mode
+
+    func test_formatJumpDelta_onDemand_isUSD() {
+        let s = UsageViewModel.formatJumpDelta(584, mode: .onDemand)
+        XCTAssertEqual(s, "+$5.84")
+    }
+
+    func test_updateJumpState_transitionRequestToOnDemand_skipsDelta() async {
+        let vm = await MainActor.run { UsageViewModel() }
+        let d1 = makeFixture(
+            requestsUsed: 400, requestsLimit: 500,
+            onDemandUsedCents: 0, onDemandLimitCents: 4000, onDemandEnabled: true,
+            isOnDemandActive: false
+        )
+        let d2 = makeFixture(
+            requestsUsed: 757, requestsLimit: 500,
+            onDemandUsedCents: 584, onDemandLimitCents: 4000, onDemandEnabled: true,
+            isOnDemandActive: true
+        )
+        await MainActor.run {
+            vm.testHook_updateJumpState(from: d1)
+            vm.testHook_updateJumpState(from: d2)
+        }
+        // Mode transition → existing `modeChanged` guard skips this delta.
+        let jump = await MainActor.run { vm.lastJump }
+        XCTAssertNil(jump)
+    }
+
+    func test_updateJumpState_subsequentOnDemand_firesJump() async {
+        let vm = await MainActor.run { UsageViewModel() }
+        let baseline = makeFixture(
+            onDemandUsedCents: 500, onDemandLimitCents: 4000, onDemandEnabled: true,
+            isOnDemandActive: true
+        )
+        let next = makeFixture(
+            onDemandUsedCents: 1100, onDemandLimitCents: 4000, onDemandEnabled: true,
+            isOnDemandActive: true
+        )
+        await MainActor.run {
+            vm.testHook_updateJumpState(from: baseline)
+            vm.testHook_updateJumpState(from: next)
+        }
+        let jump = await MainActor.run { vm.lastJump }
+        XCTAssertNotNil(jump)
+        XCTAssertEqual(jump?.mode, .onDemand)
+        XCTAssertEqual(jump?.deltaCanonical, 600)
+        XCTAssertEqual(jump?.displayDelta, "+$6.00")
+    }
+}
+
+// MARK: - Test fixture
+
+private func makeFixture(
+    email: String = "test@test.com",
+    name: String = "Test",
+    membershipType: String? = nil,
+    planUsedCents: Int? = nil,
+    planLimitCents: Int? = nil,
+    serverPercentUsed: Double? = nil,
+    requestsUsed: Int = 0,
+    requestsLimit: Int = 0,
+    onDemandUsedCents: Int? = nil,
+    onDemandLimitCents: Int? = nil,
+    onDemandEnabled: Bool? = nil,
+    isOnDemandActive: Bool = false,
+    cycleStartDate: Date? = nil,
+    resetDate: Date? = nil,
+    daysUntilReset: Int? = 5
+) -> UsageDisplayData {
+    UsageDisplayData(
+        email: email,
+        name: name,
+        membershipType: membershipType,
+        planUsedCents: planUsedCents,
+        planLimitCents: planLimitCents,
+        serverPercentUsed: serverPercentUsed,
+        requestsUsed: requestsUsed,
+        requestsLimit: requestsLimit,
+        onDemandUsedCents: onDemandUsedCents,
+        onDemandLimitCents: onDemandLimitCents,
+        onDemandEnabled: onDemandEnabled,
+        isOnDemandActive: isOnDemandActive,
+        cycleStartDate: cycleStartDate,
+        resetDate: resetDate,
+        daysUntilReset: daysUntilReset
+    )
 }
