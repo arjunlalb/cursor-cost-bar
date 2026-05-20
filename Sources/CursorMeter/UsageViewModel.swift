@@ -156,6 +156,11 @@ final class UsageViewModel {
     /// when usage crosses 80/90 in the new cycle.
     private var previousCycleStart: Date?
 
+    /// Sticky-latched flag: once on-demand mode is entered, it persists until the
+    /// billing cycle rolls over (or the user logs out). Prevents oscillation from
+    /// API jitter at the request-limit boundary.
+    private var isOnDemandLatched: Bool = false
+
     // MARK: - Init
 
     init() {
@@ -198,6 +203,7 @@ final class UsageViewModel {
         weeklyData = nil
         isEnterpriseTeam = false
         previousCycleStart = nil
+        isOnDemandLatched = false
         previousPlanUsedCents = nil
         previousRequestsUsed = nil
         previousServerPercent = nil
@@ -242,12 +248,24 @@ final class UsageViewModel {
             let summary = try? await summaryResult
             let usage = try? await usageResult
 
+            let baseData: UsageDisplayData?
             if let summary {
-                usageData = UsageDisplayData.from(summary: summary, usage: usage, userInfo: userInfo)
+                baseData = UsageDisplayData.from(summary: summary, usage: usage, userInfo: userInfo)
             } else if let usage {
-                usageData = UsageDisplayData.from(usage: usage, userInfo: userInfo)
+                baseData = UsageDisplayData.from(usage: usage, userInfo: userInfo)
             } else {
                 throw APIError.httpError(statusCode: 0)
+            }
+
+            if let base = baseData {
+                // Latch update: once activated, stays active until cycle rollover (handled
+                // in the existing rollover block below) or logout (resetPerAccountState).
+                if !isOnDemandLatched && base.wouldActivateOnDemand {
+                    isOnDemandLatched = true
+                    notificationManager.resetNotifications()
+                    Log.info("On-demand mode latched ON — threshold notifications reset")
+                }
+                usageData = base.withOnDemandActive(isOnDemandLatched)
             }
             Log.info("Usage data refreshed")
             networkRetryTask?.cancel()
@@ -689,6 +707,26 @@ final class UsageViewModel {
     /// the regular `refresh()` path is the only legitimate caller in app code.
     internal func testHook_updateJumpState(from data: UsageDisplayData) {
         updateJumpState(from: data)
+    }
+
+    /// Test-only entry to mirror `refresh()`'s latch + injection step.
+    /// Not for production code — `refresh()` is the legitimate caller.
+    internal func testHook_applyLatch(base: UsageDisplayData) {
+        if !isOnDemandLatched && base.wouldActivateOnDemand {
+            isOnDemandLatched = true
+            notificationManager.resetNotifications()
+        }
+        usageData = base.withOnDemandActive(isOnDemandLatched)
+    }
+
+    /// Read accessor for the latched-threshold dedup set (for test assertions).
+    internal func testHook_notifiedThresholds() -> Set<Int> {
+        notificationManager.notifiedThresholds
+    }
+
+    /// Seed the threshold dedup set so tests can simulate post-notification state.
+    internal func testHook_setNotifiedThresholds(_ set: Set<Int>) {
+        notificationManager.testHook_seed(set)
     }
 
     /// Builds a `JumpEvent` from raw delta/limit. Pure function — exposed for testing.

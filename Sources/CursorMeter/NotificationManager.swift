@@ -70,6 +70,12 @@ final class NotificationManager {
         notifiedThresholds.removeAll()
     }
 
+    /// Test-only — overwrites the dedup set so oscillation/rollover tests can
+    /// simulate post-notification state.
+    internal func testHook_seed(_ set: Set<Int>) {
+        notifiedThresholds = set
+    }
+
     // MARK: - Usage Jump Notification
 
     /// Identifier prefix used for usage-jump notification requests, kept distinct
