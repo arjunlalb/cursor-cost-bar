@@ -504,6 +504,72 @@ final class UsageDisplayDataTests: XCTestCase {
         XCTAssertTrue(data.hasOnDemand)
     }
 
+    // MARK: - wouldActivateOnDemand (derived trigger flag)
+
+    func test_wouldActivate_requestQuotaExceeded() {
+        let data = makeOnDemandData(
+            requestsUsed: 757,
+            requestsLimit: 500,
+            onDemandLimitCents: 4000,
+            onDemandEnabled: true
+        )
+        XCTAssertTrue(data.wouldActivateOnDemand)
+    }
+
+    func test_wouldActivate_requestBoundaryEqual() {
+        let data = makeOnDemandData(
+            requestsUsed: 500,
+            requestsLimit: 500,
+            onDemandLimitCents: 4000,
+            onDemandEnabled: true
+        )
+        XCTAssertTrue(data.wouldActivateOnDemand)
+    }
+
+    func test_wouldActivate_underQuota() {
+        let data = makeOnDemandData(
+            requestsUsed: 400,
+            requestsLimit: 500,
+            onDemandLimitCents: 4000,
+            onDemandEnabled: true
+        )
+        XCTAssertFalse(data.wouldActivateOnDemand)
+    }
+
+    func test_wouldActivate_noOnDemand() {
+        let data = makeOnDemandData(
+            requestsUsed: 757,
+            requestsLimit: 500,
+            onDemandLimitCents: 0,
+            onDemandEnabled: nil
+        )
+        XCTAssertFalse(data.wouldActivateOnDemand)
+    }
+
+    func test_wouldActivate_creditBasedExhausted() {
+        let data = makeOnDemandData(
+            planUsedCents: 2000,
+            planLimitCents: 2000,
+            requestsUsed: 0,
+            requestsLimit: 0,
+            onDemandLimitCents: 4000,
+            onDemandEnabled: true
+        )
+        XCTAssertTrue(data.wouldActivateOnDemand)
+    }
+
+    func test_wouldActivate_creditBasedZeroLimitNoActivation() {
+        let data = makeOnDemandData(
+            planUsedCents: 0,
+            planLimitCents: 0,
+            requestsUsed: 0,
+            requestsLimit: 0,
+            onDemandLimitCents: 4000,
+            onDemandEnabled: true
+        )
+        XCTAssertFalse(data.wouldActivateOnDemand)
+    }
+
     // MARK: - teamUsage.onDemand fallback (Enterprise team members)
 
     func test_teamUsage_onDemand_populatesDisplayData() {
@@ -538,6 +604,33 @@ final class UsageDisplayDataTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// Helper for wouldActivateOnDemand tests — exposes all quota + on-demand fields.
+    private func makeOnDemandData(
+        planUsedCents: Int? = nil,
+        planLimitCents: Int? = nil,
+        requestsUsed: Int,
+        requestsLimit: Int,
+        onDemandLimitCents: Int?,
+        onDemandEnabled: Bool?
+    ) -> UsageDisplayData {
+        UsageDisplayData(
+            email: "test@test.com",
+            name: "Test",
+            membershipType: nil,
+            planUsedCents: planUsedCents,
+            planLimitCents: planLimitCents,
+            serverPercentUsed: nil,
+            requestsUsed: requestsUsed,
+            requestsLimit: requestsLimit,
+            onDemandUsedCents: 0,
+            onDemandLimitCents: onDemandLimitCents,
+            onDemandEnabled: onDemandEnabled,
+            cycleStartDate: nil,
+            resetDate: nil,
+            daysUntilReset: 5
+        )
+    }
 
     private func makeCreditData(
         usedCents: Int,

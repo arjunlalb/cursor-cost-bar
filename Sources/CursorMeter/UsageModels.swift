@@ -181,6 +181,18 @@ struct UsageDisplayData: Sendable {
         return onDemandEnabled ?? true
     }
 
+    /// True when the user's primary quota is exhausted AND on-demand is active.
+    /// Pure derived value — does NOT include the sticky latch (that lives in
+    /// UsageViewModel and is injected via `isOnDemandActive`).
+    var wouldActivateOnDemand: Bool {
+        guard hasOnDemand else { return false }
+        if requestsLimit > 0 && requestsUsed >= requestsLimit { return true }
+        if isCreditBased,
+           let limit = planLimitCents, limit > 0,
+           let used = planUsedCents, used >= limit { return true }
+        return false
+    }
+
     var onDemandText: String? {
         guard let used = onDemandUsedCents, let limit = onDemandLimitCents, limit > 0 else {
             return nil
