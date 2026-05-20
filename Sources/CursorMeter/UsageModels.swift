@@ -116,9 +116,31 @@ struct UsageDisplayData: Sendable {
     let onDemandUsedCents: Int?
     let onDemandLimitCents: Int?
     let onDemandEnabled: Bool?
+    /// Injected by UsageViewModel after sticky-latch logic. When true, the
+    /// presentation computeds (percentUsed, usageLabel, usageText, menuBar*)
+    /// reflect on-demand spend instead of the primary dimension.
+    let isOnDemandActive: Bool
     let cycleStartDate: Date?
     let resetDate: Date?
     let daysUntilReset: Int?
+
+    /// Returns a copy with `isOnDemandActive` overridden. Used by UsageViewModel
+    /// to inject the sticky-latched mode after computing it.
+    func withOnDemandActive(_ active: Bool) -> UsageDisplayData {
+        UsageDisplayData(
+            email: email, name: name, membershipType: membershipType,
+            planUsedCents: planUsedCents, planLimitCents: planLimitCents,
+            serverPercentUsed: serverPercentUsed,
+            requestsUsed: requestsUsed, requestsLimit: requestsLimit,
+            onDemandUsedCents: onDemandUsedCents,
+            onDemandLimitCents: onDemandLimitCents,
+            onDemandEnabled: onDemandEnabled,
+            isOnDemandActive: active,
+            cycleStartDate: cycleStartDate,
+            resetDate: resetDate,
+            daysUntilReset: daysUntilReset
+        )
+    }
 
     var isCreditBased: Bool {
         planLimitCents != nil && planLimitCents! > 0
@@ -130,6 +152,11 @@ struct UsageDisplayData: Sendable {
     }
 
     var percentUsed: Double {
+        if isOnDemandActive {
+            guard let limit = onDemandLimitCents, limit > 0,
+                  let used = onDemandUsedCents else { return 0 }
+            return Double(used) / Double(limit) * 100.0
+        }
         if isPercentOnly, let server = serverPercentUsed { return server }
         if isCreditBased {
             guard let limit = planLimitCents, limit > 0, let used = planUsedCents else { return 0 }
@@ -144,6 +171,9 @@ struct UsageDisplayData: Sendable {
     }
 
     var usageText: String {
+        if isOnDemandActive {
+            return "\(Self.formatUSD(onDemandUsedCents ?? 0)) / \(Self.formatUSD(onDemandLimitCents ?? 0))"
+        }
         if isPercentOnly { return percentText }
         if isCreditBased {
             return "\(Self.formatUSD(planUsedCents ?? 0)) / \(Self.formatUSD(planLimitCents ?? 0))"
@@ -153,6 +183,9 @@ struct UsageDisplayData: Sendable {
 
     /// Compact fraction text for the menu bar icon (no `$`, 1 decimal for credit)
     var menuBarUsedText: String {
+        if isOnDemandActive {
+            return Self.formatCompactUSD(onDemandUsedCents ?? 0)
+        }
         if isPercentOnly { return percentText }
         if isCreditBased {
             return Self.formatCompactUSD(planUsedCents ?? 0)
@@ -161,6 +194,9 @@ struct UsageDisplayData: Sendable {
     }
 
     var menuBarLimitText: String {
+        if isOnDemandActive {
+            return Self.formatCompactUSD(onDemandLimitCents ?? 0)
+        }
         if isPercentOnly { return "" }
         if isCreditBased {
             return Self.formatCompactUSD(planLimitCents ?? 0)
@@ -169,6 +205,7 @@ struct UsageDisplayData: Sendable {
     }
 
     var usageLabel: String {
+        if isOnDemandActive { return "On-demand" }
         if isPercentOnly { return "Plan Usage" }
         return isCreditBased ? "Plan Usage" : "Requests"
     }
@@ -275,6 +312,7 @@ struct UsageDisplayData: Sendable {
             onDemandUsedCents: onDemand?.used,
             onDemandLimitCents: onDemand?.limit,
             onDemandEnabled: onDemand?.enabled,
+            isOnDemandActive: false,
             cycleStartDate: parseDate(summary.billingCycleStart),
             resetDate: resetDate,
             daysUntilReset: daysUntilReset(to: resetDate)
@@ -301,6 +339,7 @@ struct UsageDisplayData: Sendable {
             onDemandUsedCents: nil,
             onDemandLimitCents: nil,
             onDemandEnabled: nil,
+            isOnDemandActive: false,
             cycleStartDate: nil,
             resetDate: resetDate,
             daysUntilReset: daysUntilReset(to: resetDate)

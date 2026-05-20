@@ -350,6 +350,7 @@ final class UsageDisplayDataTests: XCTestCase {
             onDemandUsedCents: nil,
             onDemandLimitCents: nil,
             onDemandEnabled: nil,
+            isOnDemandActive: false,
             cycleStartDate: nil,
             resetDate: nil,
             daysUntilReset: daysUntilReset
@@ -405,6 +406,7 @@ final class UsageDisplayDataTests: XCTestCase {
             requestsUsed: 0, requestsLimit: 0,
             onDemandUsedCents: nil, onDemandLimitCents: nil,
             onDemandEnabled: nil,
+            isOnDemandActive: false,
             cycleStartDate: nil, resetDate: nil, daysUntilReset: 5
         )
         XCTAssertTrue(data.isPercentOnly)
@@ -477,6 +479,7 @@ final class UsageDisplayDataTests: XCTestCase {
             onDemandUsedCents: 0,
             onDemandLimitCents: 4000,
             onDemandEnabled: false,
+            isOnDemandActive: false,
             cycleStartDate: nil,
             resetDate: nil,
             daysUntilReset: 5
@@ -497,6 +500,7 @@ final class UsageDisplayDataTests: XCTestCase {
             onDemandUsedCents: 0,
             onDemandLimitCents: 4000,
             onDemandEnabled: nil,
+            isOnDemandActive: false,
             cycleStartDate: nil,
             resetDate: nil,
             daysUntilReset: 5
@@ -570,6 +574,61 @@ final class UsageDisplayDataTests: XCTestCase {
         XCTAssertFalse(data.wouldActivateOnDemand)
     }
 
+    // MARK: - isOnDemandActive branched presentation
+
+    func test_percentUsed_onDemandMode_usesOnDemandRatio() {
+        // 584 / 4000 = 14.6%
+        let data = makeOnDemandData(
+            requestsUsed: 757, requestsLimit: 500,
+            onDemandUsedCents: 584, onDemandLimitCents: 4000,
+            onDemandEnabled: true, isOnDemandActive: true)
+        XCTAssertEqual(data.percentUsed, 14.6, accuracy: 0.05)
+    }
+
+    func test_usageLabel_onDemandMode_isOnDemand() {
+        let data = makeOnDemandData(
+            onDemandUsedCents: 584, onDemandLimitCents: 4000,
+            onDemandEnabled: true, isOnDemandActive: true)
+        XCTAssertEqual(data.usageLabel, "On-demand")
+    }
+
+    func test_usageText_onDemandMode_isUSD() {
+        let data = makeOnDemandData(
+            onDemandUsedCents: 584, onDemandLimitCents: 4000,
+            onDemandEnabled: true, isOnDemandActive: true)
+        XCTAssertEqual(data.usageText, "$5.84 / $40.00")
+    }
+
+    func test_menuBarText_onDemandMode_compactUSD() {
+        let data = makeOnDemandData(
+            onDemandUsedCents: 584, onDemandLimitCents: 4000,
+            onDemandEnabled: true, isOnDemandActive: true)
+        XCTAssertEqual(data.menuBarUsedText, "5.8")
+        XCTAssertEqual(data.menuBarLimitText, "40.0")
+    }
+
+    func test_presentationUnchanged_whenLatchInactive() {
+        // Same data with isOnDemandActive=false should preserve legacy behavior.
+        let data = makeOnDemandData(
+            requestsUsed: 757, requestsLimit: 500,
+            onDemandUsedCents: 584, onDemandLimitCents: 4000,
+            onDemandEnabled: true, isOnDemandActive: false)
+        XCTAssertEqual(data.usageLabel, "Requests")
+        XCTAssertEqual(data.usageText, "757 / 500")
+        XCTAssertEqual(data.percentUsed, 151.4, accuracy: 0.5)
+    }
+
+    func test_withOnDemandActive_returnsCopyWithFlagSet() {
+        let base = makeOnDemandData(
+            onDemandUsedCents: 100, onDemandLimitCents: 4000,
+            onDemandEnabled: true, isOnDemandActive: false)
+        let active = base.withOnDemandActive(true)
+        XCTAssertFalse(base.isOnDemandActive)
+        XCTAssertTrue(active.isOnDemandActive)
+        // Other fields preserved
+        XCTAssertEqual(active.onDemandUsedCents, base.onDemandUsedCents)
+    }
+
     // MARK: - teamUsage.onDemand fallback (Enterprise team members)
 
     func test_teamUsage_onDemand_populatesDisplayData() {
@@ -605,14 +664,17 @@ final class UsageDisplayDataTests: XCTestCase {
 
     // MARK: - Helpers
 
-    /// Helper for wouldActivateOnDemand tests — exposes all quota + on-demand fields.
+    /// Helper for wouldActivateOnDemand / isOnDemandActive tests —
+    /// exposes all quota + on-demand fields.
     private func makeOnDemandData(
         planUsedCents: Int? = nil,
         planLimitCents: Int? = nil,
-        requestsUsed: Int,
-        requestsLimit: Int,
+        requestsUsed: Int = 0,
+        requestsLimit: Int = 0,
+        onDemandUsedCents: Int? = 0,
         onDemandLimitCents: Int?,
-        onDemandEnabled: Bool?
+        onDemandEnabled: Bool?,
+        isOnDemandActive: Bool = false
     ) -> UsageDisplayData {
         UsageDisplayData(
             email: "test@test.com",
@@ -623,9 +685,10 @@ final class UsageDisplayDataTests: XCTestCase {
             serverPercentUsed: nil,
             requestsUsed: requestsUsed,
             requestsLimit: requestsLimit,
-            onDemandUsedCents: 0,
+            onDemandUsedCents: onDemandUsedCents,
             onDemandLimitCents: onDemandLimitCents,
             onDemandEnabled: onDemandEnabled,
+            isOnDemandActive: isOnDemandActive,
             cycleStartDate: nil,
             resetDate: nil,
             daysUntilReset: 5
@@ -650,6 +713,7 @@ final class UsageDisplayDataTests: XCTestCase {
             onDemandUsedCents: nil,
             onDemandLimitCents: nil,
             onDemandEnabled: nil,
+            isOnDemandActive: false,
             cycleStartDate: nil,
             resetDate: nil,
             daysUntilReset: daysUntilReset
