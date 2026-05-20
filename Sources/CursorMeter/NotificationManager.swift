@@ -8,6 +8,39 @@ enum ThresholdLevel: Sendable, Equatable {
     case critical
 }
 
+// MARK: - Notification Mode
+
+enum NotificationMode: Sendable, Equatable {
+    case requestQuota(used: Int, limit: Int)
+    case creditPlan(usedCents: Int, limitCents: Int)
+    case onDemand(usedCents: Int, limitCents: Int)
+}
+
+extension NotificationMode {
+    static func formatUSD(_ cents: Int) -> String {
+        String(format: "$%.2f", Double(cents) / 100.0)
+    }
+
+    func body(forPercent percent: Int) -> String {
+        switch self {
+        case let .requestQuota(used, limit):
+            return "월 요청 한도의 \(percent)%를 초과했습니다 (\(used) / \(limit))"
+        case let .creditPlan(used, limit):
+            return "월 플랜의 \(percent)%를 사용했습니다 (\(Self.formatUSD(used)) / \(Self.formatUSD(limit)))"
+        case let .onDemand(used, limit):
+            return "On-demand 청구의 \(percent)%를 사용했습니다 (\(Self.formatUSD(used)) / \(Self.formatUSD(limit)))"
+        }
+    }
+
+    var titleSuffix: String {
+        switch self {
+        case .requestQuota: return "Request Quota"
+        case .creditPlan:   return "Plan"
+        case .onDemand:     return "On-demand"
+        }
+    }
+}
+
 // MARK: - Notification Manager
 
 @MainActor
@@ -37,7 +70,8 @@ final class NotificationManager {
         percentUsed: Double,
         warningThreshold: Int,
         criticalThreshold: Int,
-        enabled: Bool
+        enabled: Bool,
+        mode: NotificationMode
     ) async {
         guard enabled else { return }
 
@@ -53,14 +87,14 @@ final class NotificationManager {
             break
         case .warning:
             await sendNotification(
-                title: "Cursor Usage Warning",
-                body: "Usage has reached \(Int(percentUsed))% of your limit."
+                title: "Cursor \(mode.titleSuffix) Warning",
+                body: mode.body(forPercent: warningThreshold)
             )
             notifiedThresholds.insert(warningThreshold)
         case .critical:
             await sendNotification(
-                title: "Cursor Usage Critical",
-                body: "Usage has reached \(Int(percentUsed))% of your limit."
+                title: "Cursor \(mode.titleSuffix) Critical",
+                body: mode.body(forPercent: criticalThreshold)
             )
             notifiedThresholds.insert(criticalThreshold)
         }

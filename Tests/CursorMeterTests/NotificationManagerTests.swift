@@ -128,7 +128,8 @@ final class NotificationManagerTests: XCTestCase {
                 percentUsed: 85,
                 warningThreshold: 80,
                 criticalThreshold: 90,
-                enabled: false // disabled to avoid actual notification
+                enabled: false, // disabled to avoid actual notification
+                mode: .requestQuota(used: 0, limit: 0)
             )
         }
         manager.resetNotifications()
@@ -165,6 +166,29 @@ final class NotificationManagerTests: XCTestCase {
         )
         XCTAssertTrue(body.contains("+15.0%"))
         XCTAssertTrue(body.contains("78.0%"))
+    }
+
+    // MARK: - NotificationMode body / titleSuffix
+
+    func test_body_requestQuota_isKorean() {
+        let s = NotificationMode.requestQuota(used: 757, limit: 500).body(forPercent: 80)
+        XCTAssertEqual(s, "월 요청 한도의 80%를 초과했습니다 (757 / 500)")
+    }
+
+    func test_body_creditPlan_includesUSD() {
+        let s = NotificationMode.creditPlan(usedCents: 1600, limitCents: 2000).body(forPercent: 80)
+        XCTAssertEqual(s, "월 플랜의 80%를 사용했습니다 ($16.00 / $20.00)")
+    }
+
+    func test_body_onDemand_includesUSD() {
+        let s = NotificationMode.onDemand(usedCents: 3200, limitCents: 4000).body(forPercent: 80)
+        XCTAssertEqual(s, "On-demand 청구의 80%를 사용했습니다 ($32.00 / $40.00)")
+    }
+
+    func test_titleSuffix_eachMode() {
+        XCTAssertEqual(NotificationMode.requestQuota(used: 0, limit: 0).titleSuffix, "Request Quota")
+        XCTAssertEqual(NotificationMode.creditPlan(usedCents: 0, limitCents: 0).titleSuffix, "Plan")
+        XCTAssertEqual(NotificationMode.onDemand(usedCents: 0, limitCents: 0).titleSuffix, "On-demand")
     }
 
     func testUsageJumpIdentifierPrefixIsDistinct() {

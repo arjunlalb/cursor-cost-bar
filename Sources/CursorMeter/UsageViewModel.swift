@@ -301,11 +301,25 @@ final class UsageViewModel {
 
             // Check notification thresholds
             if let data = usageData {
+                let mode: NotificationMode = {
+                    if data.isOnDemandActive {
+                        return .onDemand(
+                            usedCents: data.onDemandUsedCents ?? 0,
+                            limitCents: data.onDemandLimitCents ?? 0)
+                    }
+                    if data.isCreditBased {
+                        return .creditPlan(
+                            usedCents: data.planUsedCents ?? 0,
+                            limitCents: data.planLimitCents ?? 0)
+                    }
+                    return .requestQuota(used: data.requestsUsed, limit: data.requestsLimit)
+                }()
                 await notificationManager.checkAndNotify(
                     percentUsed: data.percentUsed,
                     warningThreshold: warningThreshold,
                     criticalThreshold: criticalThreshold,
-                    enabled: notificationEnabled
+                    enabled: notificationEnabled,
+                    mode: mode
                 )
             }
         } catch APIError.unauthorized {
