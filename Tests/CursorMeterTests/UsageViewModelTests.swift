@@ -112,26 +112,26 @@ final class UsageViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func test_latch_resetsOnCycleRollover() async {
+    func test_latch_rolloverIntoFreshCycle_immediatelyUnlatches() async {
         let vm = UsageViewModel()
         let cycle1 = Date(timeIntervalSince1970: 1_700_000_000)
         let cycle2 = Date(timeIntervalSince1970: 1_702_678_400)
 
-        // Cycle 1: cross threshold → latched
+        // Cycle 1: latched
         let over1 = makeFixture(
             requestsUsed: 600, requestsLimit: 500,
             onDemandUsedCents: 100, onDemandLimitCents: 4000, onDemandEnabled: true,
             cycleStartDate: cycle1)
         vm.testHook_applyLatchAndRollover(base: over1)
-        XCTAssertEqual(vm.usageData?.isOnDemandActive, true)
+        XCTAssertEqual(vm.usageData?.isOnDemandActive, true, "should latch in cycle 1")
 
-        // Cycle 2: new billing period, fresh start, under quota
+        // Cycle 2: new cycle, FRESH data (under quota). Must unlatch on THIS refresh.
         let fresh = makeFixture(
             requestsUsed: 50, requestsLimit: 500,
             onDemandUsedCents: 0, onDemandLimitCents: 4000, onDemandEnabled: true,
             cycleStartDate: cycle2)
         vm.testHook_applyLatchAndRollover(base: fresh)
-        XCTAssertEqual(vm.usageData?.isOnDemandActive, false)
+        XCTAssertEqual(vm.usageData?.isOnDemandActive, false, "must unlatch immediately, not after 1 refresh")
     }
 }
 

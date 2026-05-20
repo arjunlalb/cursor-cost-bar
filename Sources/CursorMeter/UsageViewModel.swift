@@ -258,8 +258,21 @@ final class UsageViewModel {
             }
 
             if let base = baseData {
-                // Latch update: once activated, stays active until cycle rollover (handled
-                // in the existing rollover block below) or logout (resetPerAccountState).
+                // Rollover detection must precede the latch update: otherwise the
+                // first refresh of a new cycle paints stale `isOnDemandActive = true`
+                // from the previous cycle's latch, and only unlatches on the *next*
+                // refresh (1-refresh display lag).
+                if let newStart = base.cycleStartDate, newStart != previousCycleStart {
+                    if previousCycleStart != nil {
+                        notificationManager.resetNotifications()
+                        isOnDemandLatched = false
+                        Log.info("Billing cycle rollover — reset notification dedup + on-demand latch")
+                    }
+                    previousCycleStart = newStart
+                }
+
+                // Latch update: once activated, stays active until cycle rollover
+                // (handled in the rollover block above) or logout (resetPerAccountState).
                 if !isOnDemandLatched && base.wouldActivateOnDemand {
                     isOnDemandLatched = true
                     notificationManager.resetNotifications()
@@ -284,18 +297,6 @@ final class UsageViewModel {
                 await applyOptimisticWeekly(task)
             } else if let data = usageData {
                 await refreshWeeklyChart(cookieHeader: cookieHeader, data: data, userInfo: userInfo)
-            }
-
-            // Detect billing-cycle rollover so threshold alerts re-arm for the
-            // new cycle. Without this, `notifiedThresholds` would only clear on
-            // logout, leaving the user silent through a full new cycle.
-            if let newStart = usageData?.cycleStartDate, newStart != previousCycleStart {
-                if previousCycleStart != nil {
-                    notificationManager.resetNotifications()
-                    isOnDemandLatched = false
-                    Log.info("Billing cycle rollover — reset notification dedup + on-demand latch")
-                }
-                previousCycleStart = newStart
             }
 
             // Check notification thresholds
