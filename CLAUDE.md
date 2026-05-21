@@ -35,7 +35,7 @@ Every feature issue follows this sequence:
 
 1. **Test case selection** — Define tests for the logic being changed/added before writing code
 2. **Implementation** — Write feature code and test code together
-3. **`swift test`** — All tests must pass (currently 197)
+3. **`swift test`** — All tests must pass
 4. **Commit/push** — Reference issue number in commit message
 5. **Post-close check** — After closing an issue, run `gh issue list --state open` and show remaining issues to the user
 
@@ -44,6 +44,7 @@ Out-of-scope discoveries during work (bugs / risks outside the requested change)
 ## Release Workflow
 
 - `release.yml` (tag push) auto-generates body. For curated notes, after workflow completes: `gh release edit <tag> --notes-file <path>` to overwrite
+- **Pre-release / beta tags** (e.g. `v0.4.0-beta.1`): `release.yml` does not auto-mark as prerelease. After workflow completes: `gh release edit <tag> --prerelease`. GitHub's `/releases/latest` API auto-excludes prereleases, so `UpdateChecker` won't notify existing stable users
 - Roll back a not-yet-distributed release (download_count ≈ 0) and re-tag same version: `gh release delete <tag> --cleanup-tag` then `git fetch --prune --prune-tags origin`
 
 ## Architecture
