@@ -41,6 +41,13 @@ Every feature issue follows this sequence:
 
 Out-of-scope discoveries during work (bugs / risks outside the requested change) → record in `.claude/notes.md` (gitignored), do not auto-fix.
 
+## UI Mockup Workflow (AppKit)
+
+Popover/menu-bar 등 시각적 UI 변경 사전 정렬 시 `docs/mockup-<issue>.html`로
+before/after side-by-side 작성 → `open` 명령으로 시각 확인 후 사용자와 합의.
+AppKit 컨텍스트라 글로벌 CLAUDE.md의 Playwright/Magic MCP UI workflow는 적용
+불가 — HTML mockup이 우회로.
+
 ## Release Workflow
 
 - `release.yml` (tag push) auto-generates body. For curated notes, after workflow completes: `gh release edit <tag> --notes-file <path>` to overwrite
