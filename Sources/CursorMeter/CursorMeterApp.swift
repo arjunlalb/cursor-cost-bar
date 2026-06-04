@@ -4,7 +4,7 @@ import AppKit
 
 @main
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     // MARK: - Properties
 
@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var loginWindow: LoginWindow?
     private var eventMonitor: Any?
+    private var popoverDismissMonitor: Any?
     private var jumpCoordinator: JumpEffectCoordinator?
     private let notificationManager = NotificationManager()
 
@@ -46,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSEvent.removeMonitor(monitor)
             eventMonitor = nil
         }
+        removePopoverDismissMonitor()
         jumpCoordinator?.stop()
         jumpCoordinator = nil
     }
@@ -109,6 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover = NSPopover()
         popover.behavior = .transient
         popover.animates = true
+        popover.delegate = self
         let popoverVC = MenuBarPopoverViewController(
             viewModel: viewModel,
             onLogin: { [weak self] in self?.showLogin() },
@@ -127,10 +130,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem.button else { return }
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        installPopoverDismissMonitor()
     }
 
     private func hidePopover() {
         popover.performClose(nil)
+    }
+
+    // .transient on its own doesn't dismiss when the user clicks a system menu
+    // extra (Battery, Wi-Fi, etc.) because those clicks land on SystemUIServer's
+    // status items rather than a regular window. A global mouse monitor closes
+    // the popover for any out-of-app click while it's open.
+    private func installPopoverDismissMonitor() {
+        guard popoverDismissMonitor == nil else { return }
+        popoverDismissMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { [weak self] _ in
+            self?.hidePopover()
+        }
+    }
+
+    private func removePopoverDismissMonitor() {
+        if let monitor = popoverDismissMonitor {
+            NSEvent.removeMonitor(monitor)
+            popoverDismissMonitor = nil
+        }
     }
 
     // MARK: - Settings Window
@@ -218,6 +242,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.observeStatusItem()
             }
         }
+    }
+
+    // MARK: - NSPopoverDelegate
+
+    func popoverDidClose(_ notification: Notification) {
+        // Covers both explicit hidePopover() and .transient auto-dismiss paths.
+        removePopoverDismissMonitor()
     }
 
     private func observePopover() {
