@@ -17,6 +17,26 @@ struct UsageEvent: Codable, Sendable {
     /// Opus calls can weigh 100+. Same unit as the plan limit (`Requests: 519 / 2000`).
     /// Nullable on errored / non-chargeable events.
     let requestsCosts: Double?
+    /// Event classification — drives per-day chart mode (plan vs on-demand).
+    /// Observed values: `USAGE_EVENT_KIND_INCLUDED_IN_BUSINESS`, `_FREE_CREDIT`,
+    /// `_ERRORED_NOT_CHARGED`, `_USAGE_BASED`. Unknown values are treated as plan.
+    let kind: String?
+    /// Cents charged for this event. For `_USAGE_BASED` events this is what hits
+    /// the user's on-demand cap; for other kinds it's a fair-value reference
+    /// not billed to the user. Fractional cents (e.g. 95.69) are normal.
+    let chargedCents: Double?
+
+    init(
+        timestamp: String,
+        requestsCosts: Double? = nil,
+        kind: String? = nil,
+        chargedCents: Double? = nil
+    ) {
+        self.timestamp = timestamp
+        self.requestsCosts = requestsCosts
+        self.kind = kind
+        self.chargedCents = chargedCents
+    }
 
     /// `Date` parsed from `timestamp`. Returns nil for malformed input.
     var date: Date? {
@@ -29,6 +49,18 @@ struct UsageEvent: Codable, Sendable {
     var requestsCostsSafe: Double {
         guard let v = requestsCosts, v.isFinite else { return 0 }
         return v
+    }
+
+    var chargedCentsSafe: Double {
+        guard let v = chargedCents, v.isFinite else { return 0 }
+        return v
+    }
+
+    /// True when this event was billed to the user's on-demand cap (i.e. plan
+    /// did not absorb it). Determines whether the containing day renders as an
+    /// on-demand day in the weekly chart.
+    var isOnDemandBilled: Bool {
+        kind == "USAGE_EVENT_KIND_USAGE_BASED"
     }
 }
 
@@ -61,8 +93,18 @@ struct TeamMember: Codable, Sendable {
 
 struct DayUsage: Sendable, Equatable {
     let date: Date
+    /// Sum of `requestsCosts` across every event of the day. Drives bar height
+    /// regardless of mode — keeps the y-axis comparable across the 7-day window
+    /// even when some bars are plan days and others are on-demand days.
     let requests: Int
     let isToday: Bool
+    /// True when any event of the day was billed `_USAGE_BASED` (on-demand).
+    /// Drives the tooltip label switch (`$X.XX` instead of the raw integer).
+    let isOnDemand: Bool
+    /// Sum of `chargedCents` across the day's on-demand-billed events only.
+    /// Zero on plan-only days. Displayed as `$X.XX` in the tooltip when
+    /// `isOnDemand == true`.
+    let onDemandCents: Int
 }
 
 extension Array where Element == UsageEvent {
@@ -79,23 +121,31 @@ extension Array where Element == UsageEvent {
         let cutoff = calendar.date(byAdding: .day, value: -6, to: startOfToday)!
         let formatter = Self.dayKeyFormatter(for: calendar)
 
-        var sums: [String: Double] = [:]
+        var buckets: [String: (requestsSum: Double, onDemandCents: Double, hasOnDemand: Bool)] = [:]
         for event in self {
             guard let eventDate = event.date else { continue }
             let day = calendar.startOfDay(for: eventDate)
             guard day >= cutoff, day <= startOfToday else { continue }
             let key = formatter.string(from: day)
-            sums[key, default: 0] += event.requestsCostsSafe
+            var b = buckets[key] ?? (0, 0, false)
+            b.requestsSum += event.requestsCostsSafe
+            if event.isOnDemandBilled {
+                b.hasOnDemand = true
+                b.onDemandCents += event.chargedCentsSafe
+            }
+            buckets[key] = b
         }
 
         return (0..<7).reversed().map { offset in
             let day = calendar.date(byAdding: .day, value: -offset, to: startOfToday)!
             let key = formatter.string(from: day)
-            let total = sums[key] ?? 0
+            let b = buckets[key] ?? (0, 0, false)
             return DayUsage(
                 date: day,
-                requests: Int(total.rounded()),
-                isToday: offset == 0
+                requests: Int(b.requestsSum.rounded()),
+                isToday: offset == 0,
+                isOnDemand: b.hasOnDemand,
+                onDemandCents: Int(b.onDemandCents.rounded())
             )
         }
     }

@@ -17,6 +17,16 @@ final class WeeklyUsageChartView: NSView {
         return f
     }()
 
+    /// Renders the hover tooltip label in the unit matching that day's billing
+    /// mode: dollars for on-demand days (real money charged), raw weighted-unit
+    /// integer for plan days (matches Cursor's `Requests: X/Y` denominator).
+    nonisolated static func tooltipText(for day: DayUsage) -> String {
+        if day.isOnDemand {
+            return String(format: "$%.2f", Double(day.onDemandCents) / 100)
+        }
+        return "\(day.requests)"
+    }
+
     override init(frame: NSRect) {
         super.init(frame: frame)
         // wantsLayer left as default (false) — avoids the ~90KB backing-store
@@ -173,7 +183,7 @@ final class WeeklyUsageChartView: NSView {
     private func drawHoverTooltip(in ctx: CGContext, chart: NSRect, yMax: Double) {
         guard let idx = hoverIndex else { return }
         let day = days[idx]
-        let text = NSAttributedString(string: "\(day.requests)", attributes: [
+        let text = NSAttributedString(string: Self.tooltipText(for: day), attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium),
             .foregroundColor: NSColor.white,
         ])

@@ -45,7 +45,28 @@ final class WeeklyUsageTests: XCTestCase {
         comps.timeZone = utcCalendar.timeZone
         let d = utcCalendar.date(from: comps)!
         let ms = Int(d.timeIntervalSince1970 * 1000)
-        return UsageEvent(timestamp: String(ms), requestsCosts: cost)
+        return UsageEvent(
+            timestamp: String(ms),
+            requestsCosts: cost,
+            kind: "USAGE_EVENT_KIND_INCLUDED_IN_BUSINESS"
+        )
+    }
+
+    /// Convenience for tests that need an on-demand-billed event on a given day.
+    private func onDemandEvent(_ ymd: String, cost: Double, charged: Double, hour: Int = 12) -> UsageEvent {
+        var comps = DateComponents()
+        let day = utcCalendar.dateComponents([.year, .month, .day], from: date(ymd))
+        comps.year = day.year; comps.month = day.month; comps.day = day.day
+        comps.hour = hour
+        comps.timeZone = utcCalendar.timeZone
+        let d = utcCalendar.date(from: comps)!
+        let ms = Int(d.timeIntervalSince1970 * 1000)
+        return UsageEvent(
+            timestamp: String(ms),
+            requestsCosts: cost,
+            kind: "USAGE_EVENT_KIND_USAGE_BASED",
+            chargedCents: charged
+        )
     }
 
     // MARK: - Response parsing
@@ -81,8 +102,25 @@ final class WeeklyUsageTests: XCTestCase {
         XCTAssertTrue(response.usageEventsDisplay.isEmpty)
     }
 
-    func testParseEventIgnoresExtraFields() throws {
-        // Real payload has many extra keys; only timestamp + requestsCosts are read.
+    func testParseEventReadsKindAndChargedCents() throws {
+        // Real payload has many extra keys (model, tokenUsage, etc.); only the
+        // four fields below are needed by the chart logic.
+        let json = """
+        {
+          "timestamp": "1780402687672",
+          "requestsCosts": 2,
+          "model": "composer-2.5-fast",
+          "kind": "USAGE_EVENT_KIND_USAGE_BASED",
+          "tokenUsage": {"totalCents": 18.17},
+          "chargedCents": 95.69
+        }
+        """
+        let event = try JSONDecoder().decode(UsageEvent.self, from: Data(json.utf8))
+        XCTAssertEqual(event.kind, "USAGE_EVENT_KIND_USAGE_BASED")
+        XCTAssertEqual(event.chargedCents, 95.69)
+    }
+
+    func testParseEventStillIgnoresUnusedFields() throws {
         let json = """
         {
           "timestamp": "1780402687672",
@@ -118,6 +156,34 @@ final class WeeklyUsageTests: XCTestCase {
     func testRequestsCostsSafeFallsBackOnInfinity() {
         let e = UsageEvent(timestamp: "1780402687672", requestsCosts: .infinity)
         XCTAssertEqual(e.requestsCostsSafe, 0)
+    }
+
+    func testIsOnDemandBilledTrueForUsageBased() {
+        let e = UsageEvent(timestamp: "1", kind: "USAGE_EVENT_KIND_USAGE_BASED")
+        XCTAssertTrue(e.isOnDemandBilled)
+    }
+
+    func testIsOnDemandBilledFalseForOtherKinds() {
+        for kind in [
+            "USAGE_EVENT_KIND_INCLUDED_IN_BUSINESS",
+            "USAGE_EVENT_KIND_FREE_CREDIT",
+            "USAGE_EVENT_KIND_ERRORED_NOT_CHARGED",
+            "SOME_FUTURE_KIND",
+        ] {
+            let e = UsageEvent(timestamp: "1", kind: kind)
+            XCTAssertFalse(e.isOnDemandBilled, "kind=\(kind) should not count as on-demand")
+        }
+    }
+
+    func testIsOnDemandBilledFalseForNilKind() {
+        let e = UsageEvent(timestamp: "1", kind: nil)
+        XCTAssertFalse(e.isOnDemandBilled)
+    }
+
+    func testChargedCentsSafeFallsBackOnNilAndInfinity() {
+        XCTAssertEqual(UsageEvent(timestamp: "1", chargedCents: nil).chargedCentsSafe, 0)
+        XCTAssertEqual(UsageEvent(timestamp: "1", chargedCents: .infinity).chargedCentsSafe, 0)
+        XCTAssertEqual(UsageEvent(timestamp: "1", chargedCents: 95.69).chargedCentsSafe, 95.69)
     }
 
     // MARK: - sevenDayRolling
@@ -185,6 +251,79 @@ final class WeeklyUsageTests: XCTestCase {
         ]
         let days = events.sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
         XCTAssertEqual(days[6].requests, 4)
+    }
+
+    // MARK: - sevenDayRolling — mode detection (#68)
+
+    func testPlanOnlyDayMarksIsOnDemandFalse() {
+        let events: [UsageEvent] = [event("2026-05-13", cost: 10)]
+        let days = events.sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
+        XCTAssertFalse(days[6].isOnDemand)
+        XCTAssertEqual(days[6].onDemandCents, 0)
+    }
+
+    func testOnDemandDayMarksIsOnDemandTrueAndSumsCents() {
+        let events: [UsageEvent] = [
+            onDemandEvent("2026-05-13", cost: 23.9, charged: 95.69),
+            onDemandEvent("2026-05-13", cost: 10.0, charged: 40.0),
+        ]
+        let days = events.sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
+        XCTAssertTrue(days[6].isOnDemand)
+        XCTAssertEqual(days[6].onDemandCents, 136, "95.69 + 40.0 = 135.69 → rounds to 136")
+    }
+
+    func testMixedDayUsesAllRequestsCostsForHeightButOnlyUsageBasedForCents() {
+        let events: [UsageEvent] = [
+            event("2026-05-13", cost: 100),                            // plan, no charge
+            onDemandEvent("2026-05-13", cost: 50, charged: 200),       // on-demand $2.00
+        ]
+        let days = events.sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
+        XCTAssertEqual(days[6].requests, 150, "height counts both: 100 + 50")
+        XCTAssertTrue(days[6].isOnDemand, "any USAGE_BASED → on-demand day")
+        XCTAssertEqual(days[6].onDemandCents, 200, "only USAGE_BASED contributes to cents")
+    }
+
+    func testMixedWindowSomeDaysOnDemandOthersPlan() {
+        let events: [UsageEvent] = [
+            event("2026-05-13", cost: 5),                              // today: plan
+            onDemandEvent("2026-05-08", cost: 20, charged: 80),        // 5 days ago: on-demand
+        ]
+        let days = events.sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
+        // Window: 05-07, 05-08, 05-09, 05-10, 05-11, 05-12, 05-13
+        XCTAssertTrue(days[1].isOnDemand, "2026-05-08 should be on-demand")
+        XCTAssertEqual(days[1].onDemandCents, 80)
+        XCTAssertFalse(days[6].isOnDemand, "today should be plan")
+        XCTAssertEqual(days[6].onDemandCents, 0)
+    }
+
+    func testFreeCreditAndErroredDoNotTriggerOnDemand() {
+        let events: [UsageEvent] = [
+            UsageEvent(timestamp: String(Int(date("2026-05-13").timeIntervalSince1970 * 1000) + 1000),
+                       requestsCosts: 10, kind: "USAGE_EVENT_KIND_FREE_CREDIT", chargedCents: 50),
+            UsageEvent(timestamp: String(Int(date("2026-05-13").timeIntervalSince1970 * 1000) + 2000),
+                       requestsCosts: 5, kind: "USAGE_EVENT_KIND_ERRORED_NOT_CHARGED", chargedCents: 0),
+        ]
+        let days = events.sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
+        XCTAssertFalse(days[6].isOnDemand)
+        XCTAssertEqual(days[6].onDemandCents, 0)
+        XCTAssertEqual(days[6].requests, 15, "both still contribute to height regardless of kind")
+    }
+
+    // MARK: - tooltipText (WeeklyUsageChartView)
+
+    func testTooltipTextPlanDayShowsInteger() {
+        let day = DayUsage(date: Date(), requests: 929, isToday: false, isOnDemand: false, onDemandCents: 0)
+        XCTAssertEqual(WeeklyUsageChartView.tooltipText(for: day), "929")
+    }
+
+    func testTooltipTextOnDemandDayShowsDollars() {
+        let day = DayUsage(date: Date(), requests: 50, isToday: false, isOnDemand: true, onDemandCents: 96)
+        XCTAssertEqual(WeeklyUsageChartView.tooltipText(for: day), "$0.96")
+    }
+
+    func testTooltipTextOnDemandDayRoundsCentsToTwoDecimals() {
+        let day = DayUsage(date: Date(), requests: 10, isToday: false, isOnDemand: true, onDemandCents: 4000)
+        XCTAssertEqual(WeeklyUsageChartView.tooltipText(for: day), "$40.00")
     }
 
     // MARK: - oldestEventDate
