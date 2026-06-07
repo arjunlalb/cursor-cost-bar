@@ -93,7 +93,17 @@ final class UsageViewModel {
     var usageData: UsageDisplayData?
     var errorMessage: String?
     var isLoading = false
-    var availableUpdate: UpdateChecker.Release?
+    /// Outcome of the most recent update check (nil = never checked this session).
+    /// Settings UI consults this to distinguish "up to date" from "check failed";
+    /// the popover only cares about `availableUpdate` (computed below).
+    var lastUpdateCheckResult: UpdateCheckResult?
+    /// Convenience for callers that only care about "is there a new release?".
+    /// Returns nil for both `.upToDate` and `.failed` so existing popover code
+    /// keeps working unchanged.
+    var availableUpdate: UpdateChecker.Release? {
+        if case .available(let release) = lastUpdateCheckResult { return release }
+        return nil
+    }
     var isCheckingUpdate = false
 
     // MARK: - Settings
@@ -164,7 +174,7 @@ final class UsageViewModel {
 
     init() {
         loadSettings()
-        Task { availableUpdate = await UpdateChecker.shared.check() }
+        Task { lastUpdateCheckResult = await UpdateChecker.shared.check() }
     }
 
     // MARK: - Session
@@ -606,7 +616,7 @@ final class UsageViewModel {
         isCheckingUpdate = true
         async let result = UpdateChecker.shared.check()
         let start = ContinuousClock.now
-        availableUpdate = await result
+        lastUpdateCheckResult = await result
         let elapsed = ContinuousClock.now - start
         if elapsed < .milliseconds(1200) {
             try? await Task.sleep(for: .milliseconds(1200) - elapsed)
