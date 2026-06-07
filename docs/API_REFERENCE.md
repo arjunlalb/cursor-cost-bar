@@ -62,53 +62,64 @@ Sole source of `teamId` for the analytics endpoints. Used by `CursorAPIClient.fe
 
 `GET`, no body. Empty / non-200 on personal plans → CursorMeter treats the account as non-enterprise and hides the weekly chart.
 
-### `GET /api/v2/analytics/team/usage`
+### `POST /api/dashboard/get-filtered-usage-events`
 
-Per-day breakdown of request usage. Used by the weekly bar graph (enterprise team accounts only). See "Endpoints observed" below for the full response shape.
+Per-event usage stream. Used by the weekly bar graph (enterprise team accounts only). Returns events newest-first; pagination via `page` / `pageSize`.
 
-## Endpoints observed (not yet used)
+Request:
 
-### `GET /api/v2/analytics/team/usage`
+- Method: `POST`
+- Headers:
+  - `Cookie: <session cookie header>`
+  - `Origin: https://cursor.com` — **required.** Without it the server returns `{"error":"Invalid origin for state-changing request"}` with no events.
+  - `Content-Type: application/json`
+- Body: `{ "teamId": <int>, "userId": <int>, "page": <int, 1-indexed>, "pageSize": <int> }`
 
-Per-day breakdown of request usage. Source for a weekly bar graph (#weekly-bar-graph). **Observed on enterprise-team accounts only**; personal-plan compatibility is unverified.
+Response shape (truncated):
 
-Query parameters:
-- `startDate=YYYY-MM-DD` (UTC date, inclusive)
-- `endDate=YYYY-MM-DD` (UTC date, inclusive)
-- `teamId=<int>` — required on enterprise; behavior without it on personal accounts is unverified
-- `user=<email>` — optional. Without it the response covers the whole team (on enterprise); with it the response is filtered to one member.
-
-Response shape (ClickHouse-style `meta` + `data`):
 ```json
 {
-  "meta": [
-    {"name":"event_date","type":"Date"},
-    {"name":"composer_requests","type":"Int64"},
-    {"name":"chat","type":"Int64"},
-    {"name":"agent_requests","type":"Int64"},
-    {"name":"subscription_included_requests","type":"Int64"},
-    {"name":"usage_based_requests","type":"Int64"},
-    {"name":"bugBot","type":"Int64"},
-    {"name":"cmdK","type":"Int64"},
-    {"name":"api_key_requests","type":"Int64"}
-  ],
-  "data": [
+  "totalUsageEventsCount": 1397,
+  "usageEventsDisplay": [
     {
-      "event_date": "2026-05-08",
-      "composer_requests": 0, "chat": 0, "agent_requests": 13,
-      "subscription_included_requests": 13, "usage_based_requests": 0,
-      "bugBot": 0, "cmdK": 0, "api_key_requests": 0
-    },
-    ...
+      "timestamp": "1780402687672",
+      "model": "composer-2.5-fast",
+      "kind": "USAGE_EVENT_KIND_INCLUDED_IN_BUSINESS",
+      "requestsCosts": 2,
+      "usageBasedCosts": "-",
+      "isTokenBasedCall": false,
+      "tokenUsage": {
+        "inputTokens": 3914,
+        "outputTokens": 1390,
+        "cacheReadTokens": 298176,
+        "totalCents": 18.167999267578125
+      },
+      "owningUser": "232352588",
+      "owningTeam": "13403082",
+      "chargedCents": 8,
+      "isChargeable": true
+    }
   ]
 }
 ```
 
 Important shape notes:
-- **Sparse** — days with zero activity are omitted. Clients must zero-fill missing dates when rendering a continuous timeline.
-- `subscription_included_requests` is the closest analog to the menu-bar ring's "used vs plan limit" axis (i.e. requests counted against the included quota).
-- `usage_based_requests` is the on-demand / overage axis.
-- Other columns are a request-type breakdown (orthogonal to per-model breakdown — see `/models` below).
+
+- **`timestamp` is a string of UTC epoch milliseconds.** Convert to `Date` via `TimeInterval(timestamp)! / 1000`.
+- **`requestsCosts` is the weighted billing unit** — light auto-complete calls weigh 1–2, Max-mode Opus calls can weigh 100+. Cursor's plan limit (e.g. 2000) is denominated in this same unit.
+- **Events are returned newest-first by timestamp** within a page. Pagination walks backwards in time; stop when the oldest event in the latest page is older than your window.
+- `chargedCents` is the dollar charge for the event. Ratio `chargedCents / requestsCosts` is usually 4 (= $0.04/unit) but some models (gpt-5.5-medium, claude-opus-4-7-high) use 2, and errored / non-chargeable events use 0.
+
+## Endpoints observed (not yet used)
+
+### `GET /api/v2/analytics/team/usage` (removed in v0.4.x)
+
+Previously used for the weekly chart. Replaced by `POST /api/dashboard/get-filtered-usage-events` because:
+
+1. The old endpoint omits days at cycle boundaries (observed: 5/30, 5/31, 6/1 missing from a known-active week).
+2. The old endpoint exposes only request *counts*, not weighted billing units — a Max-mode Opus call and a light auto-complete both contribute 1.
+
+Documented here only for archeology.
 
 ### `GET /api/v2/analytics/team/models`
 ### `GET /api/v2/analytics/team/models/aggregated`

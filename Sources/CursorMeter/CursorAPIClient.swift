@@ -12,7 +12,11 @@ actor CursorAPIClient {
     private static let usageSummaryURL = URL(string: "https://www.cursor.com/api/usage-summary")!
     private static let userInfoURL = URL(string: "https://www.cursor.com/api/auth/me")!
     private static let teamsURL = URL(string: "https://www.cursor.com/api/dashboard/teams")!
-    private static let weeklyUsageBase = "https://www.cursor.com/api/v2/analytics/team/usage"
+    // Dashboard POST endpoints reject the `www.` host (308 redirect) when
+    // combined with `Origin: https://cursor.com` — the bare-host canonical URL
+    // is the only one that returns 200 for these CSRF-checked endpoints.
+    private static let filteredUsageEventsURL = URL(string: "https://cursor.com/api/dashboard/get-filtered-usage-events")!
+    private static let teamSpendURL = URL(string: "https://cursor.com/api/dashboard/get-team-spend")!
 
     private let session: URLSession
 
@@ -50,31 +54,72 @@ actor CursorAPIClient {
         return try JSONDecoder().decode(TeamsResponse.self, from: data)
     }
 
-    /// Fetches per-day usage rows for the given window. `startDate` / `endDate`
-    /// are inclusive UTC dates formatted `YYYY-MM-DD`.
+    /// Fetches one page of usage events from the dashboard. Events are returned
+    /// newest-first; callers paginate by incrementing `page` until the oldest
+    /// event in a page is older than the desired window (or `totalUsageEventsCount`
+    /// is reached).
+    ///
+    /// Requires the `Origin: https://cursor.com` header — the endpoint enforces
+    /// origin checks on POST. Without it the server returns
+    /// `{"error":"Invalid origin for state-changing request"}`.
     func fetchWeeklyUsage(
         cookieHeader: String,
         teamId: Int,
-        user: String,
-        startDate: String,
-        endDate: String
-    ) async throws -> WeeklyUsageResponse {
-        var comps = URLComponents(string: Self.weeklyUsageBase)!
-        comps.queryItems = [
-            URLQueryItem(name: "startDate", value: startDate),
-            URLQueryItem(name: "endDate", value: endDate),
-            URLQueryItem(name: "teamId", value: String(teamId)),
-            URLQueryItem(name: "user", value: user),
+        userId: Int,
+        page: Int,
+        pageSize: Int = 100
+    ) async throws -> FilteredUsageEventsResponse {
+        let bodyDict: [String: Any] = [
+            "teamId": teamId,
+            "userId": userId,
+            "page": page,
+            "pageSize": pageSize,
         ]
-        let data = try await performRequest(url: comps.url!, cookieHeader: cookieHeader)
-        return try JSONDecoder().decode(WeeklyUsageResponse.self, from: data)
+        let body = try JSONSerialization.data(withJSONObject: bodyDict, options: [])
+        let data = try await performRequest(
+            url: Self.filteredUsageEventsURL,
+            cookieHeader: cookieHeader,
+            method: "POST",
+            body: body,
+            origin: "https://cursor.com"
+        )
+        return try JSONDecoder().decode(FilteredUsageEventsResponse.self, from: data)
     }
 
-    private func performRequest(url: URL, cookieHeader: String, method: String = "GET") async throws -> Data {
+    /// Fetches the team's member-spend roster solely to discover the caller's
+    /// numeric `userId`. Required because `/api/auth/me` returns a workos id but
+    /// the dashboard endpoint expects the numeric id. Same Origin-header
+    /// requirement as the filtered-usage endpoint.
+    func fetchTeamSpend(cookieHeader: String, teamId: Int) async throws -> TeamSpendResponse {
+        let body = try JSONSerialization.data(withJSONObject: ["teamId": teamId], options: [])
+        let data = try await performRequest(
+            url: Self.teamSpendURL,
+            cookieHeader: cookieHeader,
+            method: "POST",
+            body: body,
+            origin: "https://cursor.com"
+        )
+        return try JSONDecoder().decode(TeamSpendResponse.self, from: data)
+    }
+
+    private func performRequest(
+        url: URL,
+        cookieHeader: String,
+        method: String = "GET",
+        body: Data? = nil,
+        origin: String? = nil
+    ) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
         request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+        if let origin {
+            request.setValue(origin, forHTTPHeaderField: "Origin")
+        }
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+        }
 
         let data: Data
         let response: URLResponse
