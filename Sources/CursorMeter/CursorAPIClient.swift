@@ -12,8 +12,11 @@ actor CursorAPIClient {
     private static let usageSummaryURL = URL(string: "https://www.cursor.com/api/usage-summary")!
     private static let userInfoURL = URL(string: "https://www.cursor.com/api/auth/me")!
     private static let teamsURL = URL(string: "https://www.cursor.com/api/dashboard/teams")!
-    private static let filteredUsageEventsURL = URL(string: "https://www.cursor.com/api/dashboard/get-filtered-usage-events")!
-    private static let teamSpendURL = URL(string: "https://www.cursor.com/api/dashboard/get-team-spend")!
+    // Dashboard POST endpoints reject the `www.` host (308 redirect) when
+    // combined with `Origin: https://cursor.com` — the bare-host canonical URL
+    // is the only one that returns 200 for these CSRF-checked endpoints.
+    private static let filteredUsageEventsURL = URL(string: "https://cursor.com/api/dashboard/get-filtered-usage-events")!
+    private static let teamSpendURL = URL(string: "https://cursor.com/api/dashboard/get-team-spend")!
 
     private let session: URLSession
 
