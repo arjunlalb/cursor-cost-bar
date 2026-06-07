@@ -93,7 +93,17 @@ final class UsageViewModel {
     var usageData: UsageDisplayData?
     var errorMessage: String?
     var isLoading = false
-    var availableUpdate: UpdateChecker.Release?
+    /// Outcome of the most recent update check (nil = never checked this session).
+    /// Settings UI consults this to distinguish "up to date" from "check failed";
+    /// the popover only cares about `availableUpdate` (computed below).
+    var lastUpdateCheckResult: UpdateCheckResult?
+    /// Convenience for callers that only care about "is there a new release?".
+    /// Returns nil for both `.upToDate` and `.failed` so existing popover code
+    /// keeps working unchanged.
+    var availableUpdate: UpdateChecker.Release? {
+        if case .available(let release) = lastUpdateCheckResult { return release }
+        return nil
+    }
     var isCheckingUpdate = false
 
     // MARK: - Settings
@@ -164,7 +174,7 @@ final class UsageViewModel {
 
     init() {
         loadSettings()
-        Task { availableUpdate = await UpdateChecker.shared.check() }
+        Task { lastUpdateCheckResult = await UpdateChecker.shared.check() }
     }
 
     // MARK: - Session
@@ -533,6 +543,16 @@ final class UsageViewModel {
         cachedUserId = nil
         previousCycleStart = nil
         isOnDemandLatched = false
+        // Jump baselines must clear on logout so the next account's first
+        // refresh doesn't compute a phantom delta against the previous user's
+        // values. (resetPerAccountState catches this on re-login, but symmetry
+        // here also covers any post-logout refresh path that bypasses login.)
+        previousPlanUsedCents = nil
+        previousRequestsUsed = nil
+        previousServerPercent = nil
+        previousOnDemandUsedCents = nil
+        previousMode = nil
+        lastJump = nil
         // Cancel any pending offline retry so it can't fire ~60s after logout
         // and clobber the cleared auth state with a 401.
         networkRetryTask?.cancel()
@@ -596,7 +616,7 @@ final class UsageViewModel {
         isCheckingUpdate = true
         async let result = UpdateChecker.shared.check()
         let start = ContinuousClock.now
-        availableUpdate = await result
+        lastUpdateCheckResult = await result
         let elapsed = ContinuousClock.now - start
         if elapsed < .milliseconds(1200) {
             try? await Task.sleep(for: .milliseconds(1200) - elapsed)

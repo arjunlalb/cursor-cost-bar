@@ -214,6 +214,27 @@ final class UsageViewModelJumpTests: XCTestCase {
         XCTAssertEqual(jump?.deltaCanonical, 600)
         XCTAssertEqual(jump?.displayDelta, "+$6.00")
     }
+
+    /// #64 — logout() must clear jump baselines. Before this fix, a refresh
+    /// against a re-login (or post-logout edge path) would compute a phantom
+    /// delta against the prior user's value. After clearing on logout, the
+    /// next first refresh is treated as a baseline-set (no jump emitted).
+    func test_logout_clearsJumpBaselines() async {
+        let vm = await MainActor.run { UsageViewModel() }
+        let baseline = makeFixture(requestsUsed: 100, requestsLimit: 500)
+        let next = makeFixture(requestsUsed: 150, requestsLimit: 500)
+
+        await MainActor.run {
+            // Establish a baseline that would otherwise emit a +50 jump on next refresh.
+            vm.testHook_updateJumpState(from: baseline)
+            // Logout clears auth + per-account state, including jump baselines.
+            vm.logout()
+            // Post-logout, a fresh delta computation must not see the prior baseline.
+            vm.testHook_updateJumpState(from: next)
+        }
+        let jump = await MainActor.run { vm.lastJump }
+        XCTAssertNil(jump, "post-logout first jump-state call must be a baseline-set, not a delta")
+    }
 }
 
 // MARK: - Test fixture

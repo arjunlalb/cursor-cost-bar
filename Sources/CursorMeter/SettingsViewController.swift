@@ -585,23 +585,31 @@ final class SettingsViewController: NSViewController {
     }
 
     private func updateUpdatesUI() {
-        if let update = viewModel.availableUpdate {
-            updateSpinner.isHidden = true
-            updateSpinner.stopAnimation(nil)
-            updateStatusLabel.stringValue = "v\(currentVersion) · v\(update.version) new"
-            updateStatusLabel.textColor = .labelColor
-            checkNowButton.isHidden = true
-            downloadButton.isHidden = false
-        } else if viewModel.isCheckingUpdate {
+        if viewModel.isCheckingUpdate {
             updateSpinner.isHidden = false
             updateSpinner.startAnimation(nil)
             updateStatusLabel.stringValue = "v\(currentVersion) · Checking..."
             updateStatusLabel.textColor = .secondaryLabelColor
             checkNowButton.isHidden = true
             downloadButton.isHidden = true
-        } else {
-            updateSpinner.isHidden = true
-            updateSpinner.stopAnimation(nil)
+            return
+        }
+
+        updateSpinner.isHidden = true
+        updateSpinner.stopAnimation(nil)
+
+        switch viewModel.lastUpdateCheckResult {
+        case .available(let release):
+            updateStatusLabel.stringValue = "v\(currentVersion) · v\(release.version) new"
+            updateStatusLabel.textColor = .labelColor
+            checkNowButton.isHidden = true
+            downloadButton.isHidden = false
+        case .failed(let reason):
+            updateStatusLabel.stringValue = "v\(currentVersion) · Couldn't check (\(reason))"
+            updateStatusLabel.textColor = .secondaryLabelColor
+            checkNowButton.isHidden = false
+            downloadButton.isHidden = true
+        case .upToDate, nil:
             updateStatusLabel.stringValue = "v\(currentVersion) · Up to date"
             updateStatusLabel.textColor = .secondaryLabelColor
             checkNowButton.isHidden = false

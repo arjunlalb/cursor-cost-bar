@@ -257,7 +257,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             _ = viewModel.isLoading
             _ = viewModel.errorMessage
             _ = viewModel.authState
-            _ = viewModel.availableUpdate
+            // Tracks the underlying stored result; the computed `availableUpdate`
+            // does not participate in @Observable change tracking on its own.
+            _ = viewModel.lastUpdateCheckResult
             _ = viewModel.refreshInterval
             _ = viewModel.weeklyData
             _ = viewModel.isEnterpriseTeam
