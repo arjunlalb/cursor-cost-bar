@@ -150,11 +150,6 @@ final class UsageViewModel {
     /// Discovered from `/api/dashboard/get-team-spend` and cached across refreshes.
     private var cachedUserId: Int?
 
-    /// Last successful user email — needed to issue an optimistic parallel
-    /// weekly fetch on subsequent refreshes without waiting for the userInfo
-    /// response from this cycle.
-    private var cachedUserEmail: String?
-
     /// Last observed billing-cycle start. Used to detect cycle rollover so we
     /// can clear the threshold-notification dedup set and let the user know
     /// when usage crosses 80/90 in the new cycle.
@@ -204,7 +199,6 @@ final class UsageViewModel {
     private func resetPerAccountState() {
         cachedTeamId = nil
         cachedUserId = nil
-        cachedUserEmail = nil
         weeklyData = nil
         isEnterpriseTeam = false
         previousCycleStart = nil
@@ -297,7 +291,6 @@ final class UsageViewModel {
 
             // Weekly chart: consume the optimistic task if we had one, otherwise
             // fall through to the sequential path that resolves teamId first.
-            cachedUserEmail = userInfo.email
             if let task = optimisticWeekly {
                 await applyOptimisticWeekly(task)
             } else if let data = usageData {
@@ -478,12 +471,19 @@ final class UsageViewModel {
         }
 
         // Discover numeric userId if absent. Matched by email against team-spend roster.
-        if cachedUserId == nil, let email = userInfo.email, !email.isEmpty {
-            do {
-                let spend = try await apiClient.fetchTeamSpend(cookieHeader: cookieHeader, teamId: teamId)
-                cachedUserId = spend.teamMemberSpend.first(where: { $0.email?.lowercased() == email.lowercased() })?.userId
-            } catch {
-                Log.info("Team-spend fetch failed: \(error.localizedDescription)")
+        if cachedUserId == nil {
+            if let email = userInfo.email, !email.isEmpty {
+                do {
+                    let spend = try await apiClient.fetchTeamSpend(cookieHeader: cookieHeader, teamId: teamId)
+                    let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    cachedUserId = spend.teamMemberSpend.first(where: {
+                        ($0.email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) == normalized
+                    })?.userId
+                } catch {
+                    Log.info("Team-spend fetch failed: \(error.localizedDescription)")
+                }
+            } else {
+                Log.info("Skipping team-spend discovery: userInfo email missing or empty")
             }
         }
         guard let userId = cachedUserId else {
