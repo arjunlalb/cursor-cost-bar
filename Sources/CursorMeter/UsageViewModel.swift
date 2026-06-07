@@ -533,6 +533,16 @@ final class UsageViewModel {
         cachedUserId = nil
         previousCycleStart = nil
         isOnDemandLatched = false
+        // Jump baselines must clear on logout so the next account's first
+        // refresh doesn't compute a phantom delta against the previous user's
+        // values. (resetPerAccountState catches this on re-login, but symmetry
+        // here also covers any post-logout refresh path that bypasses login.)
+        previousPlanUsedCents = nil
+        previousRequestsUsed = nil
+        previousServerPercent = nil
+        previousOnDemandUsedCents = nil
+        previousMode = nil
+        lastJump = nil
         // Cancel any pending offline retry so it can't fire ~60s after logout
         // and clobber the cleared auth state with a 401.
         networkRetryTask?.cancel()
