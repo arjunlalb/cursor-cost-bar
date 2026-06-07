@@ -146,6 +146,10 @@ final class UsageViewModel {
     /// on every cycle.
     private var cachedTeamId: Int?
 
+    /// Numeric user id (e.g. 232352588) for the dashboard filtered-usage endpoint.
+    /// Discovered from `/api/dashboard/get-team-spend` and cached across refreshes.
+    private var cachedUserId: Int?
+
     /// Last successful user email — needed to issue an optimistic parallel
     /// weekly fetch on subsequent refreshes without waiting for the userInfo
     /// response from this cycle.
@@ -199,6 +203,7 @@ final class UsageViewModel {
 
     private func resetPerAccountState() {
         cachedTeamId = nil
+        cachedUserId = nil
         cachedUserEmail = nil
         weeklyData = nil
         isEnterpriseTeam = false
@@ -240,7 +245,7 @@ final class UsageViewModel {
             // one round-trip on every subsequent enterprise refresh. First
             // refresh after login falls back to the sequential path inside
             // `refreshWeeklyChart`.
-            let optimisticWeekly: Task<WeeklyUsageResponse, Error>? =
+            let optimisticWeekly: Task<[DayUsage], Error>? =
                 makeOptimisticWeeklyTask(cookieHeader: cookieHeader)
 
             let userInfo = try await userInfoResult
@@ -364,56 +369,78 @@ final class UsageViewModel {
 
     // MARK: - Weekly chart refresh
 
-    private static let weeklyDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(identifier: "UTC")!
-        f.calendar = cal
-        f.timeZone = cal.timeZone
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
+    /// Max pages to walk before giving up. Safety cap — realistic 7-day volume
+    /// is ~30 events for an active user, so even a 100-event/day burst stops
+    /// well within 5 pages of size 100.
+    private static let weeklyMaxPages = 5
+    private static let weeklyPageSize = 100
 
-    /// Returns a parallel-startable weekly fetch when state allows, or nil to
-    /// signal the caller should run the sequential `refreshWeeklyChart` path.
+    /// Returns an optimistic weekly task only when we have *both* a cached
+    /// teamId and userId — otherwise we have to discover one first via the
+    /// sequential path.
     private func makeOptimisticWeeklyTask(
         cookieHeader: String
-    ) -> Task<WeeklyUsageResponse, Error>? {
-        guard let teamId = cachedTeamId,
-              let email = cachedUserEmail, !email.isEmpty
-        else { return nil }
-        let (startDay, endDay) = Self.weeklyWindow(today: Date(), calendar: .current)
+    ) -> Task<[DayUsage], Error>? {
+        guard let teamId = cachedTeamId, let userId = cachedUserId else { return nil }
         let apiClient = self.apiClient
+        let pageSize = Self.weeklyPageSize
+        let maxPages = Self.weeklyMaxPages
         return Task {
-            try await apiClient.fetchWeeklyUsage(
+            try await Self.collectWeeklyEvents(
+                apiClient: apiClient,
                 cookieHeader: cookieHeader,
                 teamId: teamId,
-                user: email,
-                startDate: startDay,
-                endDate: endDay
-            )
+                userId: userId,
+                pageSize: pageSize,
+                maxPages: maxPages
+            ).sevenDayRolling(today: Date(), calendar: .current)
         }
     }
 
-    private static func weeklyWindow(today: Date, calendar: Calendar) -> (start: String, end: String) {
-        let endDay = weeklyDateFormatter.string(from: today)
-        let startDay = weeklyDateFormatter.string(
-            from: calendar.date(byAdding: .day, value: -6, to: today) ?? today
-        )
-        return (startDay, endDay)
+    /// Walks pages newest-first, stopping once a page contains events older
+    /// than the 7-day cutoff. Returns the flattened event list (caller folds
+    /// via `sevenDayRolling`).
+    nonisolated static func collectWeeklyEvents(
+        apiClient: CursorAPIClient,
+        cookieHeader: String,
+        teamId: Int,
+        userId: Int,
+        pageSize: Int,
+        maxPages: Int,
+        today: Date = Date(),
+        calendar: Calendar = .current
+    ) async throws -> [UsageEvent] {
+        let cutoff = calendar.date(
+            byAdding: .day,
+            value: -6,
+            to: calendar.startOfDay(for: today)
+        )!
+        var collected: [UsageEvent] = []
+        for page in 1...maxPages {
+            let response = try await apiClient.fetchWeeklyUsage(
+                cookieHeader: cookieHeader,
+                teamId: teamId,
+                userId: userId,
+                page: page,
+                pageSize: pageSize
+            )
+            let events = response.usageEventsDisplay
+            collected.append(contentsOf: events)
+            if events.isEmpty { break }
+            guard let oldest = events.oldestEventDate() else { break }
+            if oldest < cutoff { break }
+        }
+        return collected
     }
 
-    /// Consumes the parallel weekly fetch result. Same error-handling shape as
-    /// the sequential `refreshWeeklyChart` 403 / generic branches, so the two
-    /// paths converge on the same observable state.
-    private func applyOptimisticWeekly(_ task: Task<WeeklyUsageResponse, Error>) async {
+    private func applyOptimisticWeekly(_ task: Task<[DayUsage], Error>) async {
         do {
-            let response = try await task.value
-            weeklyData = response.sevenDayRolling(today: Date(), calendar: .current)
+            weeklyData = try await task.value
             isEnterpriseTeam = true
         } catch APIError.forbidden {
-            Log.info("Weekly analytics returned 403 — clearing enterprise cache")
+            Log.info("Weekly fetch returned 403 — clearing enterprise cache")
             cachedTeamId = nil
+            cachedUserId = nil
             isEnterpriseTeam = false
             weeklyData = nil
         } catch {
@@ -429,14 +456,13 @@ final class UsageViewModel {
         data: UsageDisplayData,
         userInfo: UserInfoResponse
     ) async {
-        guard data.membershipType?.lowercased() == "enterprise",
-              let email = userInfo.email, !email.isEmpty
-        else {
+        guard data.membershipType?.lowercased() == "enterprise" else {
             isEnterpriseTeam = false
             weeklyData = nil
             return
         }
 
+        // Discover team id if absent.
         if cachedTeamId == nil {
             do {
                 let teams = try await apiClient.fetchTeams(cookieHeader: cookieHeader)
@@ -445,44 +471,45 @@ final class UsageViewModel {
                 Log.info("Teams fetch failed (treating as non-enterprise): \(error.localizedDescription)")
             }
         }
-
         guard let teamId = cachedTeamId else {
             isEnterpriseTeam = false
             weeklyData = nil
             return
         }
 
-        let now = Date()
-        let calendar = Calendar.current
-        let endDay = Self.weeklyDateFormatter.string(from: now)
-        let startDay = Self.weeklyDateFormatter.string(
-            from: calendar.date(byAdding: .day, value: -6, to: now) ?? now
-        )
+        // Discover numeric userId if absent. Matched by email against team-spend roster.
+        if cachedUserId == nil, let email = userInfo.email, !email.isEmpty {
+            do {
+                let spend = try await apiClient.fetchTeamSpend(cookieHeader: cookieHeader, teamId: teamId)
+                cachedUserId = spend.teamMemberSpend.first(where: { $0.email?.lowercased() == email.lowercased() })?.userId
+            } catch {
+                Log.info("Team-spend fetch failed: \(error.localizedDescription)")
+            }
+        }
+        guard let userId = cachedUserId else {
+            isEnterpriseTeam = false
+            weeklyData = nil
+            return
+        }
 
         do {
-            let response = try await apiClient.fetchWeeklyUsage(
+            let events = try await Self.collectWeeklyEvents(
+                apiClient: apiClient,
                 cookieHeader: cookieHeader,
                 teamId: teamId,
-                user: email,
-                startDate: startDay,
-                endDate: endDay
+                userId: userId,
+                pageSize: Self.weeklyPageSize,
+                maxPages: Self.weeklyMaxPages
             )
-            // Local calendar for "today" is a spec decision (issue #60):
-            // labels stay intuitive for the user, at the cost of up to 1 day
-            // of UTC→local edge slippage near midnight.
-            weeklyData = response.sevenDayRolling(today: now, calendar: calendar)
+            weeklyData = events.sevenDayRolling(today: Date(), calendar: .current)
             isEnterpriseTeam = true
         } catch APIError.forbidden {
-            // 403 here means the cached team id is no longer authoritative —
-            // the user was removed from the team, downgraded from enterprise,
-            // or switched accounts. Drop the cache so the next refresh re-
-            // resolves it cleanly, and surface the chart-off state immediately.
-            Log.info("Weekly analytics returned 403 — clearing enterprise cache")
+            Log.info("Weekly fetch returned 403 — clearing enterprise cache")
             cachedTeamId = nil
+            cachedUserId = nil
             isEnterpriseTeam = false
             weeklyData = nil
         } catch {
-            // Other failures (network blip, server hiccup) keep the cache.
             Log.info("Weekly fetch failed: \(error.localizedDescription)")
             if weeklyData == nil {
                 isEnterpriseTeam = false
@@ -503,6 +530,7 @@ final class UsageViewModel {
         weeklyData = nil
         isEnterpriseTeam = false
         cachedTeamId = nil
+        cachedUserId = nil
         previousCycleStart = nil
         isOnDemandLatched = false
         // Cancel any pending offline retry so it can't fire ~60s after logout

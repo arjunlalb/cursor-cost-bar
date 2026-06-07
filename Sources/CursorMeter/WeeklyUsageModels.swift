@@ -1,40 +1,42 @@
 import Foundation
 
-// MARK: - API Response: /api/v2/analytics/team/usage (ClickHouse meta+data shape)
+// MARK: - API Response: /api/dashboard/get-filtered-usage-events
 
-struct WeeklyUsageResponse: Codable, Sendable {
-    let meta: [MetaField]
-    let data: [WeeklyUsageRow]
+/// Per-event usage stream from Cursor's dashboard backend. Used by the weekly
+/// bar graph (enterprise team accounts). See `docs/API_REFERENCE.md` for the
+/// request shape and the Origin-header requirement.
+struct FilteredUsageEventsResponse: Codable, Sendable {
+    let totalUsageEventsCount: Int?
+    let usageEventsDisplay: [UsageEvent]
+}
 
-    struct MetaField: Codable, Sendable {
-        let name: String
-        let type: String
+struct UsageEvent: Codable, Sendable {
+    /// UTC epoch milliseconds as a string (e.g. "1780402687672").
+    let timestamp: String
+    /// Cursor's weighted billing unit — light auto-completes weigh 1, Max-mode
+    /// Opus calls can weigh 100+. Same unit as the plan limit (`Requests: 519 / 2000`).
+    /// Nullable on errored / non-chargeable events.
+    let requestsCosts: Double?
+
+    /// `Date` parsed from `timestamp`. Returns nil for malformed input.
+    var date: Date? {
+        guard let ms = Double(timestamp) else { return nil }
+        return Date(timeIntervalSince1970: ms / 1000)
+    }
+
+    /// Defensive accessor — nil / non-finite values count as 0 so a single
+    /// malformed event can't crash or skew the daily sum.
+    var requestsCostsSafe: Double {
+        guard let v = requestsCosts, v.isFinite else { return 0 }
+        return v
     }
 }
 
-struct WeeklyUsageRow: Codable, Sendable {
-    /// `YYYY-MM-DD` (UTC date as returned by the analytics endpoint).
-    let eventDate: String
-    let subscriptionIncludedRequests: Int
-    let usageBasedRequests: Int
+// MARK: - API Response: /api/dashboard/teams (unchanged from previous version)
 
-    /// Chart axis — combined included + on-demand requests for the day.
-    var totalRequests: Int {
-        subscriptionIncludedRequests + usageBasedRequests
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case eventDate = "event_date"
-        case subscriptionIncludedRequests = "subscription_included_requests"
-        case usageBasedRequests = "usage_based_requests"
-    }
-}
-
-// MARK: - API Response: /api/dashboard/teams
-
-/// Minimal shape — only the fields needed to pick a `teamId` for the analytics
-/// endpoint. The real Cursor dashboard response carries more fields; everything
-/// outside `id`/`name` is ignored.
+/// Minimal shape — only the fields needed to pick a `teamId` for the
+/// dashboard endpoint. The real Cursor dashboard response carries more fields;
+/// everything outside `id`/`name` is ignored.
 struct TeamsResponse: Codable, Sendable {
     let teams: [Team]
 }
@@ -42,6 +44,17 @@ struct TeamsResponse: Codable, Sendable {
 struct Team: Codable, Sendable {
     let id: Int
     let name: String?
+}
+
+// MARK: - API Response: /api/dashboard/get-team-spend (used solely to discover numeric userId)
+
+struct TeamSpendResponse: Codable, Sendable {
+    let teamMemberSpend: [TeamMember]
+}
+
+struct TeamMember: Codable, Sendable {
+    let userId: Int
+    let email: String?
 }
 
 // MARK: - 7-day rolling display model
@@ -52,31 +65,61 @@ struct DayUsage: Sendable, Equatable {
     let isToday: Bool
 }
 
-extension WeeklyUsageResponse {
-    /// Builds an ordered 7-day array ending on `today` (rightmost).
-    /// Missing days in `data` are zero-filled. The match between API
-    /// `event_date` (UTC `YYYY-MM-DD`) and a window date uses the supplied
-    /// calendar — pass `Calendar.current` for production (local TZ), inject
-    /// UTC in tests for determinism.
+extension Array where Element == UsageEvent {
+    /// Builds an ordered 7-day array ending on `today` (rightmost). Sums each
+    /// event's `requestsCosts` into its local-calendar day; rounds the final
+    /// per-day sum to the nearest Int for the chart's display shape. Events
+    /// older than the 7-day window are silently ignored.
+    ///
+    /// `calendar` controls day boundary interpretation (pass `Calendar.current`
+    /// in production for KST handling; inject a UTC calendar in tests for
+    /// determinism).
     func sevenDayRolling(today: Date = Date(), calendar: Calendar = .current) -> [DayUsage] {
         let startOfToday = calendar.startOfDay(for: today)
+        let cutoff = calendar.date(byAdding: .day, value: -6, to: startOfToday)!
         let formatter = Self.dayKeyFormatter(for: calendar)
 
-        let byDate = Dictionary(uniqueKeysWithValues: data.map { ($0.eventDate, $0) })
+        var sums: [String: Double] = [:]
+        for event in self {
+            guard let eventDate = event.date else { continue }
+            let day = calendar.startOfDay(for: eventDate)
+            guard day >= cutoff, day <= startOfToday else { continue }
+            let key = formatter.string(from: day)
+            sums[key, default: 0] += event.requestsCostsSafe
+        }
 
         return (0..<7).reversed().map { offset in
             let day = calendar.date(byAdding: .day, value: -offset, to: startOfToday)!
             let key = formatter.string(from: day)
-            let requests = byDate[key]?.totalRequests ?? 0
-            return DayUsage(date: day, requests: requests, isToday: offset == 0)
+            let total = sums[key] ?? 0
+            return DayUsage(
+                date: day,
+                requests: Int(total.rounded()),
+                isToday: offset == 0
+            )
         }
     }
 
-    /// Cached `yyyy-MM-dd` formatter keyed by calendar timezone. `sevenDayRolling`
-    /// gets called on every refresh; allocating a fresh `DateFormatter` (~100µs)
-    /// each time is wasteful when the timezone is effectively fixed in production.
-    /// MainActor-only callsites today, but the cache itself is read-only after
-    /// first miss per timezone so concurrent reads are safe.
+    /// Returns the oldest event's date in the receiver, or nil if none parses.
+    /// Used by the paginator to decide whether to fetch another page.
+    func oldestEventDate() -> Date? {
+        var oldest: Date?
+        for event in self {
+            guard let d = event.date else { continue }
+            if let curr = oldest {
+                if d < curr { oldest = d }
+            } else {
+                oldest = d
+            }
+        }
+        return oldest
+    }
+
+    /// Cached `yyyy-MM-dd` formatter keyed by calendar timezone. The rolling
+    /// fold runs once per refresh; allocating a fresh `DateFormatter` (~100µs)
+    /// each time is wasteful when the timezone is effectively fixed in
+    /// production. MainActor-only callsites today, but the cache itself is
+    /// read-only after first miss per timezone so concurrent reads are safe.
     private nonisolated(unsafe) static var formatterCache: [String: DateFormatter] = [:]
 
     private static func dayKeyFormatter(for calendar: Calendar) -> DateFormatter {

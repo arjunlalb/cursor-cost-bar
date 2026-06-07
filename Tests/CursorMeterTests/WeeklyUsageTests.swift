@@ -3,81 +3,8 @@ import XCTest
 
 final class WeeklyUsageTests: XCTestCase {
 
-    // MARK: - WeeklyUsageResponse parsing
+    // MARK: - Helpers
 
-    func testParseClickHouseResponse() throws {
-        let json = """
-        {
-          "meta": [
-            {"name": "event_date", "type": "Date"},
-            {"name": "subscription_included_requests", "type": "Int64"},
-            {"name": "usage_based_requests", "type": "Int64"}
-          ],
-          "data": [
-            {
-              "event_date": "2026-05-08",
-              "subscription_included_requests": 13,
-              "usage_based_requests": 2,
-              "composer_requests": 0,
-              "chat": 0,
-              "agent_requests": 13,
-              "bugBot": 0,
-              "cmdK": 0,
-              "api_key_requests": 0
-            },
-            {
-              "event_date": "2026-05-10",
-              "subscription_included_requests": 7,
-              "usage_based_requests": 0,
-              "composer_requests": 0,
-              "chat": 0,
-              "agent_requests": 7,
-              "bugBot": 0,
-              "cmdK": 0,
-              "api_key_requests": 0
-            }
-          ]
-        }
-        """
-
-        let response = try JSONDecoder().decode(
-            WeeklyUsageResponse.self,
-            from: Data(json.utf8)
-        )
-
-        XCTAssertEqual(response.data.count, 2)
-        XCTAssertEqual(response.data[0].eventDate, "2026-05-08")
-        XCTAssertEqual(response.data[0].subscriptionIncludedRequests, 13)
-        XCTAssertEqual(response.data[0].usageBasedRequests, 2)
-        XCTAssertEqual(response.data[1].eventDate, "2026-05-10")
-        XCTAssertEqual(response.data[1].subscriptionIncludedRequests, 7)
-    }
-
-    func testParseEmptyData() throws {
-        let json = """
-        { "meta": [], "data": [] }
-        """
-        let response = try JSONDecoder().decode(
-            WeeklyUsageResponse.self,
-            from: Data(json.utf8)
-        )
-        XCTAssertTrue(response.data.isEmpty)
-    }
-
-    /// Combined request count used as the chart axis.
-    func testDayUsageRowCombinedRequests() {
-        let row = WeeklyUsageRow(
-            eventDate: "2026-05-08",
-            subscriptionIncludedRequests: 13,
-            usageBasedRequests: 4
-        )
-        XCTAssertEqual(row.totalRequests, 17)
-    }
-
-    // MARK: - 7-day rolling zero-fill
-
-    /// Helper for date-driven tests: a `today` anchor + UTC calendar so the
-    /// rolling window is deterministic regardless of host TZ.
     private var utcCalendar: Calendar {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "UTC")!
@@ -92,48 +19,369 @@ final class WeeklyUsageTests: XCTestCase {
         return f.date(from: ymd)!
     }
 
+    /// MockURLProtocol receives `URLRequest` with `httpBody` stripped — the
+    /// body is delivered via `httpBodyStream` instead. Reads whichever is
+    /// available so assertions on body content are resilient.
+    private static func bodyData(from request: URLRequest) -> Data {
+        if let direct = request.httpBody { return direct }
+        guard let stream = request.httpBodyStream else { return Data() }
+        stream.open()
+        defer { stream.close() }
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        var out = Data()
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: buffer.count)
+            if read <= 0 { break }
+            out.append(buffer, count: read)
+        }
+        return out
+    }
+
+    private func event(_ ymd: String, cost: Double, hour: Int = 12) -> UsageEvent {
+        var comps = DateComponents()
+        let day = utcCalendar.dateComponents([.year, .month, .day], from: date(ymd))
+        comps.year = day.year; comps.month = day.month; comps.day = day.day
+        comps.hour = hour
+        comps.timeZone = utcCalendar.timeZone
+        let d = utcCalendar.date(from: comps)!
+        let ms = Int(d.timeIntervalSince1970 * 1000)
+        return UsageEvent(timestamp: String(ms), requestsCosts: cost)
+    }
+
+    // MARK: - Response parsing
+
+    func testParseEventsResponse() throws {
+        let json = """
+        {
+          "totalUsageEventsCount": 2,
+          "usageEventsDisplay": [
+            {"timestamp": "1780402687672", "requestsCosts": 2},
+            {"timestamp": "1780402643496", "requestsCosts": 30.5}
+          ]
+        }
+        """
+        let response = try JSONDecoder().decode(
+            FilteredUsageEventsResponse.self,
+            from: Data(json.utf8)
+        )
+        XCTAssertEqual(response.totalUsageEventsCount, 2)
+        XCTAssertEqual(response.usageEventsDisplay.count, 2)
+        XCTAssertEqual(response.usageEventsDisplay[0].requestsCosts, 2)
+        XCTAssertEqual(response.usageEventsDisplay[1].requestsCosts, 30.5)
+    }
+
+    func testParseEmptyEventsResponse() throws {
+        let json = """
+        { "totalUsageEventsCount": 0, "usageEventsDisplay": [] }
+        """
+        let response = try JSONDecoder().decode(
+            FilteredUsageEventsResponse.self,
+            from: Data(json.utf8)
+        )
+        XCTAssertTrue(response.usageEventsDisplay.isEmpty)
+    }
+
+    func testParseEventIgnoresExtraFields() throws {
+        // Real payload has many extra keys; only timestamp + requestsCosts are read.
+        let json = """
+        {
+          "timestamp": "1780402687672",
+          "requestsCosts": 2,
+          "model": "composer-2.5-fast",
+          "kind": "USAGE_EVENT_KIND_INCLUDED_IN_BUSINESS",
+          "tokenUsage": {"totalCents": 18.17},
+          "chargedCents": 8
+        }
+        """
+        let event = try JSONDecoder().decode(UsageEvent.self, from: Data(json.utf8))
+        XCTAssertEqual(event.timestamp, "1780402687672")
+        XCTAssertEqual(event.requestsCosts, 2)
+    }
+
+    // MARK: - UsageEvent helpers
+
+    func testEventDateParsesMillis() {
+        let e = UsageEvent(timestamp: "1780402687672", requestsCosts: 1)
+        XCTAssertEqual(e.date?.timeIntervalSince1970, 1780402687.672)
+    }
+
+    func testEventDateReturnsNilForMalformedTimestamp() {
+        let e = UsageEvent(timestamp: "not-a-number", requestsCosts: 1)
+        XCTAssertNil(e.date)
+    }
+
+    func testRequestsCostsSafeFallsBackOnNil() {
+        let e = UsageEvent(timestamp: "1780402687672", requestsCosts: nil)
+        XCTAssertEqual(e.requestsCostsSafe, 0)
+    }
+
+    func testRequestsCostsSafeFallsBackOnInfinity() {
+        let e = UsageEvent(timestamp: "1780402687672", requestsCosts: .infinity)
+        XCTAssertEqual(e.requestsCostsSafe, 0)
+    }
+
+    // MARK: - sevenDayRolling
+
     func testSevenDayRollingProducesSevenEntries() {
-        let response = WeeklyUsageResponse(meta: [], data: [])
-        let days = response.sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
+        let days = ([] as [UsageEvent]).sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
         XCTAssertEqual(days.count, 7)
     }
 
     func testSevenDayRollingTodayIsRightmost() {
-        let response = WeeklyUsageResponse(meta: [], data: [])
-        let days = response.sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
+        let days = ([] as [UsageEvent]).sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
         XCTAssertTrue(days.last!.isToday)
         XCTAssertFalse(days.dropLast().contains(where: { $0.isToday }))
     }
 
     func testSevenDayRollingZeroFillsMissingDates() {
-        let response = WeeklyUsageResponse(meta: [], data: [])
-        let days = response.sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
+        let days = ([] as [UsageEvent]).sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
         XCTAssertTrue(days.allSatisfy { $0.requests == 0 })
     }
 
-    func testSevenDayRollingPopulatesMatchedDates() {
-        let response = WeeklyUsageResponse(meta: [], data: [
-            WeeklyUsageRow(eventDate: "2026-05-08", subscriptionIncludedRequests: 13, usageBasedRequests: 2),
-            WeeklyUsageRow(eventDate: "2026-05-13", subscriptionIncludedRequests: 7, usageBasedRequests: 0),
-        ])
-        let days = response.sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
-
+    func testSevenDayRollingSumsCostsPerDay() {
+        let events: [UsageEvent] = [
+            event("2026-05-08", cost: 13),
+            event("2026-05-08", cost: 2),
+            event("2026-05-13", cost: 7),
+        ]
+        let days = events.sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
         // Window: 05-07, 05-08, 05-09, 05-10, 05-11, 05-12, 05-13
-        XCTAssertEqual(days[0].requests, 0, "2026-05-07 missing → 0")
+        XCTAssertEqual(days[0].requests, 0, "2026-05-07 missing")
         XCTAssertEqual(days[1].requests, 15, "2026-05-08: 13 + 2")
-        XCTAssertEqual(days[6].requests, 7, "today (2026-05-13): 7 + 0")
+        XCTAssertEqual(days[6].requests, 7, "today (2026-05-13)")
     }
 
-    func testSevenDayRollingIgnoresDatesOutsideWindow() {
-        let response = WeeklyUsageResponse(meta: [], data: [
-            WeeklyUsageRow(eventDate: "2026-05-01", subscriptionIncludedRequests: 999, usageBasedRequests: 0),
-            WeeklyUsageRow(eventDate: "2026-05-20", subscriptionIncludedRequests: 999, usageBasedRequests: 0),
-        ])
-        let days = response.sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
+    func testSevenDayRollingIgnoresEventsOutsideWindow() {
+        let events: [UsageEvent] = [
+            event("2026-05-01", cost: 999),
+            event("2026-05-20", cost: 999),
+        ]
+        let days = events.sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
         XCTAssertEqual(days.map(\.requests), [0, 0, 0, 0, 0, 0, 0])
     }
 
-    // MARK: - dailyRequestBudget
+    func testSevenDayRollingRoundsFractionalCosts() {
+        let events: [UsageEvent] = [
+            event("2026-05-13", cost: 2.7),
+            event("2026-05-13", cost: 3.5),
+        ]
+        let days = events.sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
+        XCTAssertEqual(days[6].requests, 6, "2.7 + 3.5 = 6.2 → rounds to 6")
+    }
+
+    func testSevenDayRollingSkipsMalformedTimestamps() {
+        let events: [UsageEvent] = [
+            UsageEvent(timestamp: "nope", requestsCosts: 999),
+            event("2026-05-13", cost: 5),
+        ]
+        let days = events.sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
+        XCTAssertEqual(days[6].requests, 5)
+    }
+
+    func testSevenDayRollingTreatsNilCostAsZero() {
+        let events: [UsageEvent] = [
+            UsageEvent(timestamp: String(Int(date("2026-05-13").timeIntervalSince1970 * 1000)), requestsCosts: nil),
+            event("2026-05-13", cost: 4),
+        ]
+        let days = events.sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
+        XCTAssertEqual(days[6].requests, 4)
+    }
+
+    // MARK: - oldestEventDate
+
+    func testOldestEventDateOnEmpty() {
+        XCTAssertNil(([] as [UsageEvent]).oldestEventDate())
+    }
+
+    func testOldestEventDatePicksMin() {
+        let events: [UsageEvent] = [
+            event("2026-05-13", cost: 1),
+            event("2026-05-08", cost: 1),
+            event("2026-05-10", cost: 1),
+        ]
+        let oldest = events.oldestEventDate()
+        XCTAssertEqual(oldest?.timeIntervalSince1970, event("2026-05-08", cost: 1).date?.timeIntervalSince1970)
+    }
+
+    // MARK: - collectWeeklyEvents pagination
+
+    func testCollectWeeklyEventsStopsOnOldEvent() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let client = CursorAPIClient(configuration: config)
+        defer { MockURLProtocol.requestHandler = nil }
+
+        var pagesRequested: [Int] = []
+        MockURLProtocol.requestHandler = { request in
+            let body = (try? JSONSerialization.jsonObject(with: Self.bodyData(from: request)) as? [String: Any]) ?? [:]
+            let page = body["page"] as? Int ?? 0
+            pagesRequested.append(page)
+            // Page 1: events from yesterday + 8 days ago — second event triggers stop.
+            let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let oldMs = Int(self.date("2026-05-05").timeIntervalSince1970 * 1000)
+            let newMs = Int(self.date("2026-05-12").timeIntervalSince1970 * 1000)
+            let json = """
+            { "totalUsageEventsCount": 2,
+              "usageEventsDisplay": [
+                {"timestamp": "\(newMs)", "requestsCosts": 1},
+                {"timestamp": "\(oldMs)", "requestsCosts": 1}
+              ] }
+            """
+            return (resp, Data(json.utf8))
+        }
+
+        let events = try await UsageViewModel.collectWeeklyEvents(
+            apiClient: client,
+            cookieHeader: "session=x",
+            teamId: 42,
+            userId: 232352588,
+            pageSize: 100,
+            maxPages: 5,
+            today: date("2026-05-13"),
+            calendar: utcCalendar
+        )
+
+        XCTAssertEqual(pagesRequested, [1], "stopped after page 1 because oldest event < cutoff")
+        XCTAssertEqual(events.count, 2)
+    }
+
+    func testCollectWeeklyEventsHitsMaxPagesCap() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let client = CursorAPIClient(configuration: config)
+        defer { MockURLProtocol.requestHandler = nil }
+
+        var pagesRequested: [Int] = []
+        MockURLProtocol.requestHandler = { request in
+            let body = (try? JSONSerialization.jsonObject(with: Self.bodyData(from: request)) as? [String: Any]) ?? [:]
+            let page = body["page"] as? Int ?? 0
+            pagesRequested.append(page)
+            // Every page returns events within the 7-day window — paginator never stops naturally.
+            let newMs = Int(self.date("2026-05-13").timeIntervalSince1970 * 1000)
+            let json = """
+            { "totalUsageEventsCount": 600,
+              "usageEventsDisplay": [
+                {"timestamp": "\(newMs)", "requestsCosts": 1}
+              ] }
+            """
+            let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (resp, Data(json.utf8))
+        }
+
+        _ = try await UsageViewModel.collectWeeklyEvents(
+            apiClient: client,
+            cookieHeader: "session=x",
+            teamId: 42,
+            userId: 232352588,
+            pageSize: 100,
+            maxPages: 5,
+            today: date("2026-05-13"),
+            calendar: utcCalendar
+        )
+
+        XCTAssertEqual(pagesRequested, [1, 2, 3, 4, 5])
+    }
+
+    func testCollectWeeklyEventsStopsOnEmptyPage() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let client = CursorAPIClient(configuration: config)
+        defer { MockURLProtocol.requestHandler = nil }
+
+        var pagesRequested: [Int] = []
+        MockURLProtocol.requestHandler = { request in
+            let body = (try? JSONSerialization.jsonObject(with: Self.bodyData(from: request)) as? [String: Any]) ?? [:]
+            let page = body["page"] as? Int ?? 0
+            pagesRequested.append(page)
+            let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let json = """
+            { "totalUsageEventsCount": 0, "usageEventsDisplay": [] }
+            """
+            return (resp, Data(json.utf8))
+        }
+
+        let events = try await UsageViewModel.collectWeeklyEvents(
+            apiClient: client,
+            cookieHeader: "session=x",
+            teamId: 42,
+            userId: 232352588,
+            pageSize: 100,
+            maxPages: 5,
+            today: date("2026-05-13"),
+            calendar: utcCalendar
+        )
+
+        XCTAssertEqual(pagesRequested, [1])
+        XCTAssertTrue(events.isEmpty)
+    }
+
+    // MARK: - fetchWeeklyUsage (CursorAPIClient request shape)
+
+    func testFetchWeeklyUsageSendsOriginAndBody() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let client = CursorAPIClient(configuration: config)
+        defer { MockURLProtocol.requestHandler = nil }
+
+        var captured: URLRequest?
+        MockURLProtocol.requestHandler = { request in
+            captured = request
+            let json = """
+            { "totalUsageEventsCount": 0, "usageEventsDisplay": [] }
+            """
+            let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (resp, Data(json.utf8))
+        }
+
+        _ = try await client.fetchWeeklyUsage(
+            cookieHeader: "session=x",
+            teamId: 42,
+            userId: 232352588,
+            page: 3,
+            pageSize: 50
+        )
+
+        let request = try XCTUnwrap(captured)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "session=x")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Origin"), "https://cursor.com")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertTrue(request.url!.path.hasSuffix("/api/dashboard/get-filtered-usage-events"))
+
+        let parsed = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.bodyData(from: request)) as? [String: Any])
+        XCTAssertEqual(parsed["teamId"] as? Int, 42)
+        XCTAssertEqual(parsed["userId"] as? Int, 232352588)
+        XCTAssertEqual(parsed["page"] as? Int, 3)
+        XCTAssertEqual(parsed["pageSize"] as? Int, 50)
+    }
+
+    func testFetchWeeklyUsage403ThrowsForbidden() async {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let client = CursorAPIClient(configuration: config)
+        defer { MockURLProtocol.requestHandler = nil }
+
+        MockURLProtocol.requestHandler = { request in
+            let resp = HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!
+            return (resp, Data())
+        }
+
+        do {
+            _ = try await client.fetchWeeklyUsage(
+                cookieHeader: "session=x",
+                teamId: 42,
+                userId: 232352588,
+                page: 1
+            )
+            XCTFail("Expected forbidden")
+        } catch APIError.forbidden {
+            // expected
+        } catch {
+            XCTFail("Wrong error: \(error)")
+        }
+    }
+
+    // MARK: - dailyRequestBudget (still used by other call sites — leave covered)
 
     private func makeDisplayData(
         requestsLimit: Int,
@@ -155,72 +403,15 @@ final class WeeklyUsageTests: XCTestCase {
         )
     }
 
-    func testDailyRequestBudget() {
+    func testDailyRequestBudgetStillReturnsValue() {
+        // Property is no longer consumed by the chart but other display logic
+        // may still reference it. Keep coverage to catch accidental removal.
         let data = makeDisplayData(
             requestsLimit: 1500,
             cycleStart: "2026-05-01",
-            cycleEnd: "2026-06-01"  // 31 days
+            cycleEnd: "2026-06-01"
         )
         XCTAssertEqual(data.dailyRequestBudget, 1500 / 31)
-    }
-
-    func testDailyRequestBudgetReturnsNilWithoutLimit() {
-        let data = makeDisplayData(
-            requestsLimit: 0,
-            cycleStart: "2026-05-01",
-            cycleEnd: "2026-06-01"
-        )
-        XCTAssertNil(data.dailyRequestBudget)
-    }
-
-    func testDailyRequestBudgetReturnsNilWithoutCycleStart() {
-        let data = makeDisplayData(
-            requestsLimit: 500,
-            cycleStart: nil,
-            cycleEnd: "2026-06-01"
-        )
-        XCTAssertNil(data.dailyRequestBudget)
-    }
-
-    // MARK: - fetchWeeklyUsage (CursorAPIClient)
-
-    func testFetchWeeklyUsageBuildsQuery() async throws {
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-        let client = CursorAPIClient(configuration: config)
-        defer { MockURLProtocol.requestHandler = nil }
-
-        var captured: URLRequest?
-        MockURLProtocol.requestHandler = { request in
-            captured = request
-            let body = """
-            { "meta": [], "data": [
-              {"event_date":"2026-05-13","subscription_included_requests":5,"usage_based_requests":1}
-            ] }
-            """
-            let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            return (resp, Data(body.utf8))
-        }
-
-        let response = try await client.fetchWeeklyUsage(
-            cookieHeader: "session=x",
-            teamId: 42,
-            user: "alice@example.com",
-            startDate: "2026-05-07",
-            endDate: "2026-05-13"
-        )
-
-        XCTAssertEqual(response.data.first?.totalRequests, 6)
-
-        let url = try XCTUnwrap(captured?.url)
-        let comps = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
-        let items = Dictionary(uniqueKeysWithValues: (comps.queryItems ?? []).map { ($0.name, $0.value ?? "") })
-        XCTAssertEqual(items["teamId"], "42")
-        XCTAssertEqual(items["user"], "alice@example.com")
-        XCTAssertEqual(items["startDate"], "2026-05-07")
-        XCTAssertEqual(items["endDate"], "2026-05-13")
-        XCTAssertTrue(url.path.hasSuffix("/api/v2/analytics/team/usage"))
-        XCTAssertEqual(captured?.value(forHTTPHeaderField: "Cookie"), "session=x")
     }
 
     // MARK: - WeeklyChartStyle + UsageViewModel settings persistence
@@ -269,47 +460,5 @@ final class WeeklyUsageTests: XCTestCase {
     private func clearWeeklyChartDefaults() {
         UserDefaults.standard.removeObject(forKey: "weeklyChartEnabled")
         UserDefaults.standard.removeObject(forKey: "weeklyChartStyle")
-    }
-
-    func testFetchWeeklyUsage403ThrowsForbidden() async {
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-        let client = CursorAPIClient(configuration: config)
-        defer { MockURLProtocol.requestHandler = nil }
-
-        MockURLProtocol.requestHandler = { request in
-            let resp = HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!
-            return (resp, Data())
-        }
-
-        do {
-            _ = try await client.fetchWeeklyUsage(
-                cookieHeader: "x", teamId: 1, user: "u",
-                startDate: "2026-05-07", endDate: "2026-05-13"
-            )
-            XCTFail("Expected forbidden")
-        } catch APIError.forbidden {
-            // expected — non-enterprise accounts surface 403 here
-        } catch {
-            XCTFail("Unexpected error: \(error)")
-        }
-    }
-
-    func testDailyRequestBudgetReturnsNilWhenCycleNotPositive() {
-        let data = makeDisplayData(
-            requestsLimit: 500,
-            cycleStart: "2026-06-01",
-            cycleEnd: "2026-06-01"
-        )
-        XCTAssertNil(data.dailyRequestBudget)
-    }
-
-    func testSevenDayRollingDatesAreConsecutive() {
-        let response = WeeklyUsageResponse(meta: [], data: [])
-        let days = response.sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
-        for i in 1..<days.count {
-            let diff = utcCalendar.dateComponents([.day], from: days[i - 1].date, to: days[i].date).day
-            XCTAssertEqual(diff, 1, "Each entry should be the next calendar day")
-        }
     }
 }

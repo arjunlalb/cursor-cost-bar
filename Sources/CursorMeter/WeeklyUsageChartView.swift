@@ -6,7 +6,6 @@ import AppKit
 @MainActor
 final class WeeklyUsageChartView: NSView {
     private var days: [DayUsage] = []
-    private var dailyBudget: Int?
     private var style: WeeklyChartStyle = .outline
     private var hoverIndex: Int?
     private var trackingArea: NSTrackingArea?
@@ -26,9 +25,8 @@ final class WeeklyUsageChartView: NSView {
 
     required init?(coder: NSCoder) { nil }
 
-    func update(days: [DayUsage], dailyBudget: Int?, style: WeeklyChartStyle) {
+    func update(days: [DayUsage], style: WeeklyChartStyle) {
         self.days = days
-        self.dailyBudget = dailyBudget
         self.style = style
         self.hoverIndex = nil
         needsDisplay = true
@@ -112,11 +110,10 @@ final class WeeklyUsageChartView: NSView {
 
         let chart = chartRect
         let weeklyMax = days.map(\.requests).max() ?? 0
-        let yMaxRaw = max(Double(weeklyMax) * 1.05, Double(dailyBudget ?? 0))
+        let yMaxRaw = Double(weeklyMax) * 1.05
         let yMax: Double = yMaxRaw > 0 ? yMaxRaw : 1
 
         drawBars(in: ctx, chart: chart, weeklyMax: weeklyMax, yMax: yMax)
-        drawBudgetLine(in: ctx, chart: chart, yMax: yMax)
         drawHoverTooltip(in: ctx, chart: chart, yMax: yMax)
     }
 
@@ -171,20 +168,6 @@ final class WeeklyUsageChartView: NSView {
         let x = frame.midX - size.width / 2
         let y = chart.minY - size.height - 2
         attr.draw(at: NSPoint(x: x, y: y))
-    }
-
-    private func drawBudgetLine(in ctx: CGContext, chart: NSRect, yMax: Double) {
-        guard let budget = dailyBudget, budget > 0 else { return }
-        let y = chart.minY + CGFloat(Double(budget) / yMax) * chart.height
-        guard y >= chart.minY, y <= chart.maxY else { return }
-        ctx.saveGState()
-        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.5).cgColor)
-        ctx.setLineWidth(1.0)
-        ctx.setLineDash(phase: 0, lengths: [4, 3])
-        ctx.move(to: CGPoint(x: chart.minX, y: y))
-        ctx.addLine(to: CGPoint(x: chart.maxX, y: y))
-        ctx.strokePath()
-        ctx.restoreGState()
     }
 
     private func drawHoverTooltip(in ctx: CGContext, chart: NSRect, yMax: Double) {
