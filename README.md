@@ -21,9 +21,9 @@ Unlike in-editor extensions, CursorMeter runs independently as a native macOS ap
 
 - Gauge ring icon in menu bar with color thresholds (green → yellow → red)
 - View billing usage, per-model request counts, and reset date from the menu bar
-- macOS notifications when usage reaches customizable thresholds (default: 65%/90%)
+- macOS notifications when usage reaches customizable thresholds (default: 80%/90%)
 - **Usage-jump effect** — menu bar icon flashes ⚡ on a moderate jump and 🚀 on a Max-mode-sized jump, so a sudden spike is hard to miss. Three intensity levels (Quiet / Normal / Bold); Bold also raises a macOS notification on tier-2 jumps.
-- **Weekly usage chart** (enterprise team accounts) — rolling 7-day bar graph in the popover with adaptive y-axis, dashed daily-budget reference line, hover tooltip, and a configurable today-highlight (Outline / Dim others / Both).
+- **Weekly usage chart** (enterprise team accounts) — rolling 7-day bar graph in the popover. Bar heights sum Cursor's weighted billing units (`requestsCosts`), so a single Max-mode Opus call correctly outweighs many light auto-completes. Hover tooltip switches per day: raw weighted-unit integer on plan-covered days, real dollars charged on on-demand days. Configurable today-highlight (Outline / Dim others / Both).
 - Menu bar display mode toggle: fraction (used/limit) or percentage (%)
 - Settings UI (refresh interval, notification thresholds, menu bar display format, jump-effect intensity, weekly-chart style)
 - Launch at login support
@@ -78,11 +78,13 @@ Unit tests (LogRedactor, UsageDisplayData, DomainWhitelist, CircularProgressIcon
 
 ## Disclaimer
 
-This app uses Cursor's **undocumented internal APIs** (`/api/usage`, `/api/usage-summary`, `/api/auth/me`). These endpoints may change or be blocked at any time without notice.
+This app uses several of Cursor's **undocumented internal endpoints** (usage, auth, and dashboard APIs — see [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) for the full list). These endpoints may change or be blocked at any time without notice.
 
 ## Roadmap
 
-- [ ] Switch progress display to on-demand when request quota exhausted ([#36](https://github.com/WoojinAhn/CursorMeter/issues/36))
+- [ ] Visual mode indicator on weekly chart bars ([#69](https://github.com/WoojinAhn/CursorMeter/issues/69))
+- [ ] Billing-cycle rollover marker on weekly chart ([#70](https://github.com/WoojinAhn/CursorMeter/issues/70))
+- [ ] Migrate auth from WebView cookie capture to API token paste ([#54](https://github.com/WoojinAhn/CursorMeter/issues/54))
 
 ## Contributing
 

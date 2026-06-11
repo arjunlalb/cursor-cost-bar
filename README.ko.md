@@ -21,9 +21,9 @@
 
 - 메뉴바 게이지 링 아이콘으로 사용량 시각화 (초록 → 노랑 → 빨강 색상 단계)
 - 메뉴바에서 빌링 사용량, 모델별 요청 횟수, 리셋 날짜 확인
-- 사용량 임계치 도달 시 macOS 알림 (기본값: 65%/90%, 커스텀 가능)
+- 사용량 임계치 도달 시 macOS 알림 (기본값: 80%/90%, 커스텀 가능)
 - **사용량 점프 이펙트** — 사용량이 한 번에 크게 올라가면 메뉴바 아이콘에 ⚡(중간 점프) 또는 🚀(Max 모드급 점프)가 잠시 표시되어, 갑작스런 증가를 놓치지 않게 합니다. 강도 3단계(Quiet / Normal / Bold) 선택 가능, Bold + 큰 점프 조합에선 macOS 알림도 함께 띄움.
-- **주간 사용량 차트** (엔터프라이즈 팀 계정) — 팝오버에 최근 7일 막대 그래프 표시. y축은 자동 스케일, 일일 예산 dashed reference line, hover tooltip, 오늘 강조 스타일 3가지(Outline / Dim / Both) 선택 가능.
+- **주간 사용량 차트** (엔터프라이즈 팀 계정) — 팝오버에 최근 7일 막대 그래프 표시. 막대 높이는 Cursor의 가중 과금 단위(`requestsCosts`) 합으로 그려져, Max-mode Opus 한 콜이 가벼운 자동완성 수십 개를 상대적으로 압도합니다. 호버 tooltip은 plan 흡수된 날은 가중 단위 정수, on-demand 청구된 날은 실제 달러로 자동 분기. 오늘 강조 스타일 3가지(Outline / Dim / Both) 선택 가능.
 - 메뉴바 표시 모드 전환: 분수(사용/한도) 또는 퍼센트(%)
 - 설정 UI (새로고침 간격, 알림 임계치, 메뉴바 표시 형식, 점프 이펙트 강도, 주간 차트 스타일)
 - 로그인 시 자동 실행 지원
@@ -78,11 +78,13 @@ Unit test (LogRedactor, UsageDisplayData, DomainWhitelist, CircularProgressIcon,
 
 ## 주의사항
 
-이 앱은 Cursor의 **비공식 내부 API** (`/api/usage`, `/api/usage-summary`, `/api/auth/me`)를 사용합니다. 해당 엔드포인트는 사전 고지 없이 변경되거나 차단될 수 있습니다.
+이 앱은 Cursor의 **비공식 내부 엔드포인트** (usage, auth, dashboard API — 전체 목록은 [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) 참조)를 사용합니다. 해당 엔드포인트는 사전 고지 없이 변경되거나 차단될 수 있습니다.
 
 ## 로드맵
 
-- [ ] 요청 한도 소진 시 On-demand 사용량으로 프로그레스 전환 ([#36](https://github.com/WoojinAhn/CursorMeter/issues/36))
+- [ ] 주간 차트 막대에 mode (plan/on-demand) 시각 표시 ([#69](https://github.com/WoojinAhn/CursorMeter/issues/69))
+- [ ] 주간 차트에 빌링 사이클 rollover 마커 표시 ([#70](https://github.com/WoojinAhn/CursorMeter/issues/70))
+- [ ] 인증 방식을 WebView 쿠키 캡처에서 API 토큰 paste 로 마이그레이션 ([#54](https://github.com/WoojinAhn/CursorMeter/issues/54))
 
 ## 기여하기
 
