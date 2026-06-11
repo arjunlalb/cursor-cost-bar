@@ -110,6 +110,11 @@ struct DayUsage: Sendable, Equatable {
     /// Zero on plan-only days. Displayed as `$X.XX` in the tooltip when
     /// `isOnDemand == true`.
     let onDemandCents: Int
+    /// Sum of `chargedCents` across every event of the day (regardless of kind).
+    /// Used as the plan-day tooltip value on token-based enterprise plans where
+    /// the plan denominator itself is dollars (#72). Request-quota plans ignore
+    /// this and keep the raw `requests` integer in the tooltip.
+    let totalChargedCents: Int
 }
 
 extension Array where Element == UsageEvent {
@@ -126,14 +131,15 @@ extension Array where Element == UsageEvent {
         let cutoff = calendar.date(byAdding: .day, value: -6, to: startOfToday)!
         let formatter = Self.dayKeyFormatter(for: calendar)
 
-        var buckets: [String: (requestsSum: Double, onDemandCents: Double, hasOnDemand: Bool)] = [:]
+        var buckets: [String: (requestsSum: Double, onDemandCents: Double, totalCents: Double, hasOnDemand: Bool)] = [:]
         for event in self {
             guard let eventDate = event.date else { continue }
             let day = calendar.startOfDay(for: eventDate)
             guard day >= cutoff, day <= startOfToday else { continue }
             let key = formatter.string(from: day)
-            var b = buckets[key] ?? (0, 0, false)
+            var b = buckets[key] ?? (0, 0, 0, false)
             b.requestsSum += event.requestsCostsSafe
+            b.totalCents += event.chargedCentsSafe
             if event.isOnDemandBilled {
                 b.hasOnDemand = true
                 b.onDemandCents += event.chargedCentsSafe
@@ -144,13 +150,14 @@ extension Array where Element == UsageEvent {
         return (0..<7).reversed().map { offset in
             let day = calendar.date(byAdding: .day, value: -offset, to: startOfToday)!
             let key = formatter.string(from: day)
-            let b = buckets[key] ?? (0, 0, false)
+            let b = buckets[key] ?? (0, 0, 0, false)
             return DayUsage(
                 date: day,
                 requests: Int(b.requestsSum.rounded()),
                 isToday: offset == 0,
                 isOnDemand: b.hasOnDemand,
-                onDemandCents: Int(b.onDemandCents.rounded())
+                onDemandCents: Int(b.onDemandCents.rounded()),
+                totalChargedCents: Int(b.totalCents.rounded())
             )
         }
     }
