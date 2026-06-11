@@ -17,6 +17,7 @@ actor CursorAPIClient {
     // is the only one that returns 200 for these CSRF-checked endpoints.
     private static let filteredUsageEventsURL = URL(string: "https://cursor.com/api/dashboard/get-filtered-usage-events")!
     private static let teamSpendURL = URL(string: "https://cursor.com/api/dashboard/get-team-spend")!
+    private static let hardLimitURL = URL(string: "https://cursor.com/api/dashboard/get-hard-limit")!
 
     private let session: URLSession
 
@@ -100,6 +101,22 @@ actor CursorAPIClient {
             origin: "https://cursor.com"
         )
         return try JSONDecoder().decode(TeamSpendResponse.self, from: data)
+    }
+
+    /// Member-facing monthly spend limit for token-based enterprise contracts.
+    /// Requires `teamId` — an empty body yields `{noUsageBasedAllowed:true}`
+    /// (all fields nil). Same bare-host + Origin requirement as the other
+    /// dashboard POST endpoints. Expected to be absent on non-usage-based plans.
+    func fetchHardLimit(cookieHeader: String, teamId: Int) async throws -> HardLimitResponse {
+        let body = try JSONSerialization.data(withJSONObject: ["teamId": teamId], options: [])
+        let data = try await performRequest(
+            url: Self.hardLimitURL,
+            cookieHeader: cookieHeader,
+            method: "POST",
+            body: body,
+            origin: "https://cursor.com"
+        )
+        return try JSONDecoder().decode(HardLimitResponse.self, from: data)
     }
 
     private func performRequest(

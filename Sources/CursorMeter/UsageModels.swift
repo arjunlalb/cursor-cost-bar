@@ -72,6 +72,17 @@ struct UsageSummaryResponse: Codable, Sendable {
 struct IndividualUsage: Codable, Sendable {
     let plan: PlanUsage?
     let onDemand: OnDemandUsage?
+    /// Present on token-based enterprise contracts that have no `plan` object.
+    /// `used` is in USD cents; `limit` is null (the member-facing limit comes
+    /// from the separate `get-hard-limit` endpoint instead).
+    let overall: OverallUsage?
+}
+
+struct OverallUsage: Codable, Sendable {
+    let enabled: Bool?
+    let used: Int?
+    let limit: Int?
+    let remaining: Int?
 }
 
 struct PlanUsage: Codable, Sendable {
@@ -91,6 +102,18 @@ struct OnDemandUsage: Codable, Sendable {
 
 struct TeamUsage: Codable, Sendable {
     let onDemand: OnDemandUsage?
+}
+
+// MARK: - API Response: /api/dashboard/get-hard-limit
+
+/// Member-facing spend limits for a token-based enterprise contract. Requires
+/// `teamId` in the POST body — an empty body returns `{noUsageBasedAllowed:true}`
+/// (all fields nil). `perUserMonthlyLimitDollars` is in **whole dollars**; the
+/// matching used amount lives in `IndividualUsage.overall.used` (cents).
+struct HardLimitResponse: Codable, Sendable {
+    let hardLimit: Int?
+    let hardLimitPerUser: Int?
+    let perUserMonthlyLimitDollars: Int?
 }
 
 // MARK: - API Response: /api/auth/me
@@ -340,7 +363,8 @@ struct UsageDisplayData: Sendable {
     static func from(
         summary: UsageSummaryResponse,
         usage: UsageResponse?,
-        userInfo: UserInfoResponse
+        userInfo: UserInfoResponse,
+        perUserMonthlyLimitDollars: Int? = nil
     ) -> UsageDisplayData {
         let model = usage?.primaryModel
         let isRequestBased = model?.maxRequestUsage != nil
@@ -349,12 +373,22 @@ struct UsageDisplayData: Sendable {
         let onDemand = summary.individualUsage?.onDemand
             ?? summary.teamUsage?.onDemand
 
+        // Token-based enterprise contracts ship no `plan` object: spend lives in
+        // `individualUsage.overall.used` (cents) and the per-seat limit in the
+        // separate hard-limit endpoint (whole dollars). Synthesize a credit-style
+        // plan from them so the popover mirrors Cursor's dashboard ($used / $limit).
+        // `??` keeps every existing path intact — a real `plan` always wins.
+        let overall = summary.individualUsage?.overall
+        let planUsedCents = plan?.used ?? overall?.used
+        let planLimitCents = plan?.limit
+            ?? perUserMonthlyLimitDollars.map { $0 * 100 }
+
         return UsageDisplayData(
             email: userInfo.email ?? "Unknown",
             name: userInfo.name ?? "Unknown",
             membershipType: summary.membershipType,
-            planUsedCents: isRequestBased ? nil : plan?.used,
-            planLimitCents: isRequestBased ? nil : plan?.limit,
+            planUsedCents: isRequestBased ? nil : planUsedCents,
+            planLimitCents: isRequestBased ? nil : planLimitCents,
             serverPercentUsed: plan?.totalPercentUsed
                 ?? Self.percent(from: summary.autoModelSelectedDisplayMessage),
             requestsUsed: isRequestBased ? requestCount(model) : 0,

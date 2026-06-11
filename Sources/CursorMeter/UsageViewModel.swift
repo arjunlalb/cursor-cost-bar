@@ -252,14 +252,24 @@ final class UsageViewModel {
             let optimisticWeekly: Task<[DayUsage], Error>? =
                 makeOptimisticWeeklyTask(cookieHeader: cookieHeader)
 
+            // Optimistic hard-limit fetch — same prior-refresh teamId gating as
+            // the weekly task. On the first refresh (teamId unknown) this is nil
+            // and token-based plans fall back to percent-only until the next
+            // refresh, once `refreshWeeklyChart` has cached the teamId.
+            let optimisticHardLimit: Task<HardLimitResponse?, Never>? =
+                makeOptimisticHardLimitTask(cookieHeader: cookieHeader)
+
             let userInfo = try await userInfoResult
 
             let summary = try? await summaryResult
             let usage = try? await usageResult
+            let hardLimit: HardLimitResponse? = await optimisticHardLimit?.value ?? nil
 
             let baseData: UsageDisplayData?
             if let summary {
-                baseData = UsageDisplayData.from(summary: summary, usage: usage, userInfo: userInfo)
+                baseData = UsageDisplayData.from(
+                    summary: summary, usage: usage, userInfo: userInfo,
+                    perUserMonthlyLimitDollars: hardLimit?.perUserMonthlyLimitDollars)
             } else if let usage {
                 baseData = UsageDisplayData.from(usage: usage, userInfo: userInfo)
             } else {
@@ -397,6 +407,19 @@ final class UsageViewModel {
                 pageSize: pageSize,
                 maxPages: maxPages
             ).sevenDayRolling(today: Date(), calendar: .current)
+        }
+    }
+
+    /// Fires the hard-limit fetch in parallel when a teamId was cached by a
+    /// prior refresh. Returns nil on the first refresh (no teamId yet) or on any
+    /// fetch error — callers treat a nil result as "no member-visible limit".
+    private func makeOptimisticHardLimitTask(
+        cookieHeader: String
+    ) -> Task<HardLimitResponse?, Never>? {
+        guard let teamId = cachedTeamId else { return nil }
+        let apiClient = self.apiClient
+        return Task {
+            try? await apiClient.fetchHardLimit(cookieHeader: cookieHeader, teamId: teamId)
         }
     }
 

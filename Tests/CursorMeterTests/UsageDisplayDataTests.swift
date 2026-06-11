@@ -464,18 +464,42 @@ final class UsageDisplayDataTests: XCTestCase {
         XCTAssertEqual(data.menuBarLimitText, "")
     }
 
-    // MARK: - Token-based enterprise (percent parsed from display message)
+    // MARK: - Token-based enterprise (issue #71)
 
-    /// Regression for issue #71: token-based enterprise members get no numeric
-    /// plan limit, so the primary row used to render a meaningless `0 / 0`.
-    /// The included-usage percent is parsed from the display message instead.
-    func test_fromSummary_tokenEnterprise_showsPercentNotZeroZero() {
+    /// Primary path: with the hard-limit endpoint's `perUserMonthlyLimitDollars`
+    /// available, the token plan renders as credit-based `$used / $limit`,
+    /// mirroring Cursor's own dashboard ("$0.17 / $100").
+    func test_tokenEnterprise_withHardLimit_showsDollars() {
         let summary = makeSummaryResponse(
             billingCycleEnd: "2099-07-09T00:00:00.000Z",
             membershipType: "enterprise",
-            autoMessage: "You've used 0% of your included total usage"
+            autoMessage: "You've used 0% of your included total usage",
+            overallUsed: 17 // cents → $0.17
         )
-        // maxRequestUsage nil → not request-based; no plan → not credit-based
+        let usage = makeUsageResponse(numRequests: 0, maxRequestUsage: nil)
+        let userInfo = UserInfoResponse(email: "ent@11st.com", name: "Woojin")
+
+        let data = UsageDisplayData.from(
+            summary: summary, usage: usage, userInfo: userInfo,
+            perUserMonthlyLimitDollars: 100) // dollars → $100
+
+        XCTAssertTrue(data.isCreditBased)
+        XCTAssertFalse(data.isPercentOnly)
+        XCTAssertEqual(data.usageText, "$0.17 / $100.00")
+        XCTAssertEqual(data.usageLabel, "Plan Usage")
+        XCTAssertEqual(data.percentUsed, 0.17, accuracy: 0.001)
+    }
+
+    /// Fallback path: no hard limit yet (first refresh, or non-usage-based) →
+    /// percent-only from the display message instead of the old `0 / 0`.
+    func test_tokenEnterprise_withoutHardLimit_fallsBackToPercent() {
+        let summary = makeSummaryResponse(
+            billingCycleEnd: "2099-07-09T00:00:00.000Z",
+            membershipType: "enterprise",
+            autoMessage: "You've used 0% of your included total usage",
+            overallUsed: 17
+        )
+        // maxRequestUsage nil → not request-based; no hard limit passed
         let usage = makeUsageResponse(numRequests: 0, maxRequestUsage: nil)
         let userInfo = UserInfoResponse(email: "ent@11st.com", name: "Woojin")
 
@@ -488,7 +512,7 @@ final class UsageDisplayDataTests: XCTestCase {
         XCTAssertEqual(data.menuBarLimitText, "")
     }
 
-    func test_fromSummary_tokenEnterprise_nonZeroPercent() {
+    func test_tokenEnterprise_nonZeroPercentFallback() {
         let summary = makeSummaryResponse(
             billingCycleEnd: "2099-07-09T00:00:00.000Z",
             membershipType: "enterprise",
@@ -503,9 +527,9 @@ final class UsageDisplayDataTests: XCTestCase {
         XCTAssertEqual(data.usageText, "37%")
     }
 
-    /// Accepted residual: with no parseable percent we fall back to `0 / 0`
+    /// Accepted residual: no hard limit AND no parseable percent → `0 / 0`
     /// rather than inventing a number (documented in issue #71).
-    func test_fromSummary_tokenEnterprise_noMessageFallsBackToRequests() {
+    func test_tokenEnterprise_noMessageNoLimit_fallsBackToRequests() {
         let summary = makeSummaryResponse(
             billingCycleEnd: "2099-07-09T00:00:00.000Z",
             membershipType: "enterprise",
@@ -518,6 +542,40 @@ final class UsageDisplayDataTests: XCTestCase {
 
         XCTAssertFalse(data.isPercentOnly)
         XCTAssertEqual(data.usageText, "0 / 0")
+    }
+
+    /// Regression guard for the `??` chain: a real `plan` object must win over
+    /// the token-based overall/hard-limit fallback.
+    func test_realPlan_winsOverOverallAndHardLimit() {
+        let summary = makeSummaryResponse(
+            billingCycleEnd: "2099-07-09T00:00:00.000Z",
+            membershipType: "pro",
+            planUsed: 800,
+            planLimit: 2000,
+            overallUsed: 999
+        )
+        let usage = makeUsageResponse(numRequests: 0, maxRequestUsage: nil)
+        let userInfo = UserInfoResponse(email: "pro@test.com", name: "Pro")
+
+        let data = UsageDisplayData.from(
+            summary: summary, usage: usage, userInfo: userInfo,
+            perUserMonthlyLimitDollars: 50)
+
+        XCTAssertEqual(data.usageText, "$8.00 / $20.00", "Real plan must win over overall/hard-limit")
+    }
+
+    func test_hardLimitResponse_decodesNoUsageBasedAllowed() throws {
+        let json = Data(#"{"noUsageBasedAllowed":true}"#.utf8)
+        let decoded = try JSONDecoder().decode(HardLimitResponse.self, from: json)
+        XCTAssertNil(decoded.perUserMonthlyLimitDollars)
+        XCTAssertNil(decoded.hardLimit)
+    }
+
+    func test_hardLimitResponse_decodesLimits() throws {
+        let json = Data(#"{"hardLimit":3000,"hardLimitPerUser":200,"perUserMonthlyLimitDollars":100}"#.utf8)
+        let decoded = try JSONDecoder().decode(HardLimitResponse.self, from: json)
+        XCTAssertEqual(decoded.perUserMonthlyLimitDollars, 100)
+        XCTAssertEqual(decoded.hardLimit, 3000)
     }
 
     func test_fromSummary_creditBased_ignoresDisplayMessage() {
@@ -771,7 +829,7 @@ final class UsageDisplayDataTests: XCTestCase {
             limitType: nil,
             isUnlimited: false,
             autoModelSelectedDisplayMessage: nil,
-            individualUsage: IndividualUsage(plan: nil, onDemand: nil),
+            individualUsage: IndividualUsage(plan: nil, onDemand: nil, overall: nil),
             teamUsage: TeamUsage(onDemand: OnDemandUsage(
                 enabled: true, used: 584, limit: 4000, remaining: 3416))
         )
@@ -885,13 +943,17 @@ final class UsageDisplayDataTests: XCTestCase {
         planUsed: Int? = nil,
         planLimit: Int? = nil,
         totalPercentUsed: Double? = nil,
-        autoMessage: String? = nil
+        autoMessage: String? = nil,
+        overallUsed: Int? = nil
     ) -> UsageSummaryResponse {
         let plan: PlanUsage? = (planUsed != nil || planLimit != nil || totalPercentUsed != nil)
             ? PlanUsage(enabled: true, used: planUsed, limit: planLimit, remaining: nil, totalPercentUsed: totalPercentUsed)
             : nil
-        let individual: IndividualUsage? = plan != nil
-            ? IndividualUsage(plan: plan, onDemand: nil)
+        let overall: OverallUsage? = overallUsed.map {
+            OverallUsage(enabled: false, used: $0, limit: nil, remaining: nil)
+        }
+        let individual: IndividualUsage? = (plan != nil || overall != nil)
+            ? IndividualUsage(plan: plan, onDemand: nil, overall: overall)
             : nil
         return UsageSummaryResponse(
             billingCycleStart: nil,

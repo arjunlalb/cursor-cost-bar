@@ -35,7 +35,7 @@ Response shape consumed by `UsageDisplayData.from(summary:)` (see `UsageModels.s
 
 The `teamId` variant is observed when an enterprise team is active. CursorMeter currently calls the un-suffixed form; this is sufficient on personal accounts. (Confirmed 2026-06: on a token-based enterprise member account the `?teamId=` response is byte-identical to the plain call.)
 
-**Token-based enterprise contracts** (`/api/dashboard/teams` → `pricingStrategy: "tokens"`, `adminOnlyUsagePricing: true`) expose **no numeric plan limit** to member accounts: there is no `plan` object (only `individualUsage.overall` with `limit: null`), and the included-usage percentage appears **only** as prose in `autoModelSelectedDisplayMessage` (e.g. `"You've used 0% of your included total usage"`). CursorMeter parses that percentage into `serverPercentUsed` so the primary row renders percent-only instead of `0 / 0`; on-demand spend still comes from `teamUsage.onDemand`. See issue #71.
+**Token-based enterprise contracts** (`/api/dashboard/teams` → `pricingStrategy: "tokens"`, `adminOnlyUsagePricing: true`) ship **no `plan` object** in `usage-summary`: spend is in `individualUsage.overall.used` (cents, `limit: null`) and the per-seat limit comes from `get-hard-limit` (see below). CursorMeter folds those into the credit-based display (`$used / $limit`, mirroring the dashboard). When the hard limit is unavailable (first refresh before `teamId` is cached, or non-usage-based plans) it falls back to parsing the percentage from `autoModelSelectedDisplayMessage` (e.g. `"You've used 0% of your included total usage"`) into `serverPercentUsed` → percent-only, instead of `0 / 0`. On-demand spend still comes from `teamUsage.onDemand`. See issue #71.
 
 ### `GET /api/usage?user=<sub>`
 
@@ -63,6 +63,16 @@ Sole source of `teamId` for the analytics endpoints. Used by `CursorAPIClient.fe
 ```
 
 `GET`, no body. Empty / non-200 on personal plans → CursorMeter treats the account as non-enterprise and hides the weekly chart.
+
+### `POST /api/dashboard/get-hard-limit`
+
+Member-facing monthly spend limit for token-based enterprise contracts. **Requires `{"teamId": <id>}` in the body** — an empty body returns `{"noUsageBasedAllowed": true}` (all fields nil). Bare-host + `Origin: https://cursor.com` like the other dashboard POSTs.
+
+```json
+{ "hardLimit": 3000, "hardLimitPerUser": 200, "perUserMonthlyLimitDollars": 100 }
+```
+
+`perUserMonthlyLimitDollars` is in **whole dollars**; combined with `individualUsage.overall.used` (cents) it yields the dashboard's "Your monthly usage $0.17 / $100". `CursorAPIClient.fetchHardLimit` fetches it optimistically (parallel, gated on a prior-refresh `teamId`); `UsageDisplayData.from` folds it into the credit-based display. See issue #71.
 
 ### `POST /api/dashboard/get-filtered-usage-events`
 
