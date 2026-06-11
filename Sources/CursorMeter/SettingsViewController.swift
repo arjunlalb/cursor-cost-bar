@@ -25,6 +25,10 @@ final class SettingsViewController: NSViewController {
     private var jumpIntensityRow = NSView()
     private var jumpGlyphStyleSegmented = NSSegmentedControl()
     private var jumpGlyphStyleRow = NSView()
+    /// Container that wraps both jump sub-rows (Intensity + Style) so the
+    /// effect-toggle animation collapses a single target rather than two
+    /// stacking peers — avoids mid-animation spacing thrash in NSStackView.
+    private var jumpSubRowsContainer = NSView()
     private var weeklyChartSection = NSView()
     private var weeklyChartToggle = NSSwitch()
     private var weeklyChartStyleSegmented = NSSegmentedControl()
@@ -165,9 +169,8 @@ final class SettingsViewController: NSViewController {
         // Jump effect
         jumpEffectToggle.state = viewModel.jumpEffectEnabled ? .on : .off
         jumpIntensitySegmented.selectedSegment = viewModel.jumpIntensity.rawValue
-        jumpIntensityRow.isHidden = !viewModel.jumpEffectEnabled
         jumpGlyphStyleSegmented.selectedSegment = viewModel.jumpGlyphStyle.rawValue
-        jumpGlyphStyleRow.isHidden = !viewModel.jumpEffectEnabled
+        jumpSubRowsContainer.isHidden = !viewModel.jumpEffectEnabled
 
         // Weekly chart — visible only on enterprise team accounts
         weeklyChartSection.isHidden = !viewModel.isEnterpriseTeam
@@ -309,7 +312,13 @@ final class SettingsViewController: NSViewController {
         description.textColor = .secondaryLabelColor
         description.font = NSFont.systemFont(ofSize: 11)
 
-        let stack = NSStackView(views: [jumpEffectToggle, jumpIntensityRow, jumpGlyphStyleRow, description])
+        let subRows = NSStackView(views: [jumpIntensityRow, jumpGlyphStyleRow])
+        subRows.orientation = .vertical
+        subRows.alignment = .left
+        subRows.spacing = 6
+        jumpSubRowsContainer = subRows
+
+        let stack = NSStackView(views: [jumpEffectToggle, jumpSubRowsContainer, description])
         stack.orientation = .vertical
         stack.alignment = .left
         stack.spacing = 6
@@ -483,10 +492,11 @@ final class SettingsViewController: NSViewController {
     @objc private func jumpEffectToggleChanged() {
         let enabled = jumpEffectToggle.state == .on
         viewModel.setJumpEffectEnabled(enabled)
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.2
-            jumpIntensityRow.animator().isHidden = !enabled
-        }
+        // animator().isHidden in an NSStackView is misleading: layout removes
+        // the view immediately while alpha fades over the animation window, so
+        // siblings appear to jump first and the view "blinks" away. Setting
+        // isHidden directly avoids the mid-animation discontinuity.
+        jumpSubRowsContainer.isHidden = !enabled
     }
 
     @objc private func jumpIntensityChanged() {
