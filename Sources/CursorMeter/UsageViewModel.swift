@@ -17,6 +17,7 @@ private enum SettingsKey: String {
     case menuBarDisplayMode
     case jumpEffectEnabled
     case jumpIntensity
+    case jumpGlyphStyle
     case weeklyChartEnabled
     case weeklyChartStyle
     // Legacy keys consulted only by `loadSettings` migration block.
@@ -77,6 +78,14 @@ enum JumpIntensity: Int, Sendable, CaseIterable {
     case bold = 2
 }
 
+/// User-selectable emoji pair for the jump effect. `classic` keeps the
+/// original energy/propulsion theme; `dollar` swaps to spend semantics for
+/// users whose mental model centers on dollar burn.
+enum JumpGlyphStyle: Int, Sendable, CaseIterable {
+    case classic = 0   // ⚡ / 🚀
+    case dollar = 1    // 💲 / 💸
+}
+
 /// Today-bar emphasis style for the weekly chart.
 enum WeeklyChartStyle: Int, Sendable, CaseIterable {
     case outline = 0
@@ -122,6 +131,7 @@ final class UsageViewModel {
     var lastJump: JumpEvent?
     var jumpEffectEnabled: Bool = true
     var jumpIntensity: JumpIntensity = .normal
+    var jumpGlyphStyle: JumpGlyphStyle = .classic
 
     // MARK: - Weekly Chart
 
@@ -680,6 +690,11 @@ final class UsageViewModel {
         UserDefaults.standard.set(intensity.rawValue, for: .jumpIntensity)
     }
 
+    func setJumpGlyphStyle(_ style: JumpGlyphStyle) {
+        jumpGlyphStyle = style
+        UserDefaults.standard.set(style.rawValue, for: .jumpGlyphStyle)
+    }
+
     func setWeeklyChartEnabled(_ enabled: Bool) {
         weeklyChartEnabled = enabled
         UserDefaults.standard.set(enabled, for: .weeklyChartEnabled)
@@ -739,6 +754,11 @@ final class UsageViewModel {
            let intensity = JumpIntensity(rawValue: raw)
         {
             jumpIntensity = intensity
+        }
+        if let raw = defaults.object(for: .jumpGlyphStyle) as? Int,
+           let style = JumpGlyphStyle(rawValue: raw)
+        {
+            jumpGlyphStyle = style
         }
         if let val = defaults.object(for: .weeklyChartEnabled) as? Bool {
             weeklyChartEnabled = val

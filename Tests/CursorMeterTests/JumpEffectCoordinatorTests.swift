@@ -74,4 +74,53 @@ final class JumpEffectCoordinatorTests: XCTestCase {
         XCTAssertTrue(params.glow)
         XCTAssertEqual(params.durationMs, 15000)
     }
+
+    // MARK: - Swap params: dollar glyph style (#73)
+
+    func testSwapParamsDollarStyleTierOne() {
+        let params = JumpEffectCoordinator.swapParams(for: .one, style: .dollar)
+        XCTAssertEqual(params.emoji, "💲")
+        XCTAssertFalse(params.glow, "glow is style-agnostic; tier-1 stays off")
+        XCTAssertEqual(params.durationMs, 6000)
+    }
+
+    func testSwapParamsDollarStyleTierTwo() {
+        let params = JumpEffectCoordinator.swapParams(for: .two, style: .dollar)
+        XCTAssertEqual(params.emoji, "💸")
+        XCTAssertTrue(params.glow, "glow is style-agnostic; tier-2 stays on")
+        XCTAssertEqual(params.durationMs, 15000)
+    }
+
+    func testSwapParamsClassicAndDollarShareTierZeroDegenerate() {
+        for style in JumpGlyphStyle.allCases {
+            let params = JumpEffectCoordinator.swapParams(for: .zero, style: style)
+            XCTAssertEqual(params.emoji, "")
+            XCTAssertFalse(params.glow)
+            XCTAssertEqual(params.durationMs, 0)
+        }
+    }
+
+    func testGlyphsForStyle() {
+        XCTAssertEqual(JumpEffectCoordinator.glyphs(for: .classic).tier1, "⚡")
+        XCTAssertEqual(JumpEffectCoordinator.glyphs(for: .classic).tier2, "🚀")
+        XCTAssertEqual(JumpEffectCoordinator.glyphs(for: .dollar).tier1, "💲")
+        XCTAssertEqual(JumpEffectCoordinator.glyphs(for: .dollar).tier2, "💸")
+    }
+
+    // MARK: - JumpGlyphStyle persistence
+
+    @MainActor
+    func testJumpGlyphStylePersists() {
+        UserDefaults.standard.removeObject(forKey: "jumpGlyphStyle")
+        let vm = UsageViewModel()
+        XCTAssertEqual(vm.jumpGlyphStyle, .classic, "default is classic for back-compat")
+
+        vm.setJumpGlyphStyle(.dollar)
+        XCTAssertEqual(UserDefaults.standard.integer(forKey: "jumpGlyphStyle"), JumpGlyphStyle.dollar.rawValue)
+
+        let reloaded = UsageViewModel()
+        XCTAssertEqual(reloaded.jumpGlyphStyle, .dollar)
+
+        UserDefaults.standard.removeObject(forKey: "jumpGlyphStyle")
+    }
 }

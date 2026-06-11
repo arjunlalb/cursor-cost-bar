@@ -77,7 +77,7 @@ final class JumpEffectCoordinator {
         let decision = Self.shouldFire(intensity: viewModel.jumpIntensity, tier: event.tier)
         guard decision.fire else { return }
 
-        let (emoji, glow, durationMs) = Self.swapParams(for: event.tier)
+        let (emoji, glow, durationMs) = Self.swapParams(for: event.tier, style: viewModel.jumpGlyphStyle)
         performSwap(emoji: emoji, glow: glow, durationMs: durationMs)
 
         if decision.notify {
@@ -144,19 +144,30 @@ final class JumpEffectCoordinator {
         }
     }
 
-    /// Maps a tier to its visual swap parameters. Pure function — exposed for testing.
-    /// Tier 0 returns degenerate values; callers should gate via `shouldFire` first.
+    /// Maps a tier + glyph style to its visual swap parameters. Pure function —
+    /// exposed for testing. Tier 0 returns degenerate values; callers should
+    /// gate via `shouldFire` first. `glow` and `durationMs` are style-agnostic.
     nonisolated static func swapParams(
-        for tier: JumpEvent.Tier
+        for tier: JumpEvent.Tier,
+        style: JumpGlyphStyle = .classic
     ) -> (emoji: String, glow: Bool, durationMs: Int) {
         // Durations sized to the refresh cadence: the minimum auto-refresh
         // interval is 60 s, so up to 15 s of tier-2 indication still leaves
         // the icon on its normal ring most of the time. 1.5–3 s in the prior
         // iteration was reliably missed by users not staring at the menu bar.
+        let (tier1Emoji, tier2Emoji) = Self.glyphs(for: style)
         switch tier {
         case .zero: return ("", false, 0)
-        case .one:  return ("⚡", false, 6000)
-        case .two:  return ("🚀", true, 15000)
+        case .one:  return (tier1Emoji, false, 6000)
+        case .two:  return (tier2Emoji, true, 15000)
+        }
+    }
+
+    /// Returns the (tier-1, tier-2) emoji pair for the active style.
+    nonisolated static func glyphs(for style: JumpGlyphStyle) -> (tier1: String, tier2: String) {
+        switch style {
+        case .classic: return ("⚡", "🚀")
+        case .dollar:  return ("💲", "💸")
         }
     }
 }

@@ -23,6 +23,8 @@ final class SettingsViewController: NSViewController {
     private var jumpEffectToggle = NSButton()
     private var jumpIntensitySegmented = NSSegmentedControl()
     private var jumpIntensityRow = NSView()
+    private var jumpGlyphStyleSegmented = NSSegmentedControl()
+    private var jumpGlyphStyleRow = NSView()
     private var weeklyChartSection = NSView()
     private var weeklyChartToggle = NSSwitch()
     private var weeklyChartStyleSegmented = NSSegmentedControl()
@@ -164,6 +166,8 @@ final class SettingsViewController: NSViewController {
         jumpEffectToggle.state = viewModel.jumpEffectEnabled ? .on : .off
         jumpIntensitySegmented.selectedSegment = viewModel.jumpIntensity.rawValue
         jumpIntensityRow.isHidden = !viewModel.jumpEffectEnabled
+        jumpGlyphStyleSegmented.selectedSegment = viewModel.jumpGlyphStyle.rawValue
+        jumpGlyphStyleRow.isHidden = !viewModel.jumpEffectEnabled
 
         // Weekly chart — visible only on enterprise team accounts
         weeklyChartSection.isHidden = !viewModel.isEnterpriseTeam
@@ -282,11 +286,30 @@ final class SettingsViewController: NSViewController {
         intensityRow.alignment = .centerY
         jumpIntensityRow = intensityRow
 
+        // Style row — segment labels are the actual emoji pairs so the result
+        // is visible inline (matches the Intensity row's segmented-control
+        // pattern). Pair order tracks `JumpGlyphStyle` raw values.
+        jumpGlyphStyleSegmented = NSSegmentedControl(
+            labels: ["⚡ 🚀", "💲 💸"],
+            trackingMode: .selectOne,
+            target: self,
+            action: #selector(jumpGlyphStyleChanged)
+        )
+        jumpGlyphStyleSegmented.selectedSegment = viewModel.jumpGlyphStyle.rawValue
+        jumpGlyphStyleSegmented.translatesAutoresizingMaskIntoConstraints = false
+
+        let styleLabel = makeLabel("Style")
+        let styleRow = NSStackView(views: [styleLabel, jumpGlyphStyleSegmented, makeSpacer()])
+        styleRow.orientation = .horizontal
+        styleRow.spacing = 8
+        styleRow.alignment = .centerY
+        jumpGlyphStyleRow = styleRow
+
         let description = makeLabel("Highlight sudden usage jumps in the menu bar.")
         description.textColor = .secondaryLabelColor
         description.font = NSFont.systemFont(ofSize: 11)
 
-        let stack = NSStackView(views: [jumpEffectToggle, jumpIntensityRow, description])
+        let stack = NSStackView(views: [jumpEffectToggle, jumpIntensityRow, jumpGlyphStyleRow, description])
         stack.orientation = .vertical
         stack.alignment = .left
         stack.spacing = 6
@@ -470,6 +493,12 @@ final class SettingsViewController: NSViewController {
         let raw = jumpIntensitySegmented.selectedSegment
         guard let intensity = JumpIntensity(rawValue: raw) else { return }
         viewModel.setJumpIntensity(intensity)
+    }
+
+    @objc private func jumpGlyphStyleChanged() {
+        let raw = jumpGlyphStyleSegmented.selectedSegment
+        guard let style = JumpGlyphStyle(rawValue: raw) else { return }
+        viewModel.setJumpGlyphStyle(style)
     }
 
     @objc private func weeklyChartToggleChanged() {
