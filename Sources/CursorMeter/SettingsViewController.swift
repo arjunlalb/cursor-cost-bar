@@ -459,10 +459,9 @@ final class SettingsViewController: NSViewController {
     @objc private func notificationToggleChanged() {
         let enabled = notificationToggle.state == .on
         viewModel.setNotificationEnabled(enabled)
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.2
-            thresholdBox.animator().isHidden = !enabled
-        }
+        // Same NSStackView caveat as the jump-effect toggle: animator().isHidden
+        // causes a layout/alpha desync that reads as a "blink". Snap instead.
+        thresholdBox.isHidden = !enabled
     }
 
     @objc private func warningSliderChanged() {
