@@ -84,6 +84,19 @@ final class SettingsViewController: NSViewController {
         outerStack.setCustomSpacing(6, after: outerStack.arrangedSubviews.last!)
         outerStack.addArrangedSubview(makeNotificationsSection())
         outerStack.setCustomSpacing(10, after: outerStack.arrangedSubviews.last!)
+        // Pin the threshold box + sliders to the outer stack's full content
+        // width (#75). Without this, NSStackView's `.left` alignment lets
+        // children fall back to their intrinsic minimum width — visibly so
+        // after the master toggle cycles `isHidden` and the layout pass
+        // re-settles on the smaller intrinsic instead of the previous width.
+        NSLayoutConstraint.activate([
+            thresholdBox.leadingAnchor.constraint(equalTo: outerStack.leadingAnchor),
+            thresholdBox.trailingAnchor.constraint(equalTo: outerStack.trailingAnchor),
+            warningSlider.leadingAnchor.constraint(equalTo: outerStack.leadingAnchor),
+            warningSlider.trailingAnchor.constraint(equalTo: outerStack.trailingAnchor),
+            criticalSlider.leadingAnchor.constraint(equalTo: outerStack.leadingAnchor),
+            criticalSlider.trailingAnchor.constraint(equalTo: outerStack.trailingAnchor),
+        ])
 
         outerStack.addArrangedSubview(makeSeparator())
         outerStack.setCustomSpacing(10, after: outerStack.arrangedSubviews.last!)
