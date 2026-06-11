@@ -311,19 +311,71 @@ final class WeeklyUsageTests: XCTestCase {
 
     // MARK: - tooltipText (WeeklyUsageChartView)
 
-    func testTooltipTextPlanDayShowsInteger() {
-        let day = DayUsage(date: Date(), requests: 929, isToday: false, isOnDemand: false, onDemandCents: 0)
-        XCTAssertEqual(WeeklyUsageChartView.tooltipText(for: day), "929")
+    private func day(
+        requests: Int = 0,
+        isOnDemand: Bool = false,
+        onDemandCents: Int = 0,
+        totalChargedCents: Int = 0
+    ) -> DayUsage {
+        DayUsage(
+            date: Date(timeIntervalSince1970: 0),
+            requests: requests,
+            isToday: false,
+            isOnDemand: isOnDemand,
+            onDemandCents: onDemandCents,
+            totalChargedCents: totalChargedCents
+        )
     }
 
-    func testTooltipTextOnDemandDayShowsDollars() {
-        let day = DayUsage(date: Date(), requests: 50, isToday: false, isOnDemand: true, onDemandCents: 96)
-        XCTAssertEqual(WeeklyUsageChartView.tooltipText(for: day), "$0.96")
+    func testTooltipTextPlanDayRequestQuotaShowsInteger() {
+        let d = day(requests: 929, totalChargedCents: 1234)
+        // Request-quota plan: integer wins, totalChargedCents ignored.
+        XCTAssertEqual(WeeklyUsageChartView.tooltipText(for: d, creditBased: false), "929")
+    }
+
+    func testTooltipTextOnDemandDayShowsDollarsRegardlessOfPlanType() {
+        let d = day(requests: 50, isOnDemand: true, onDemandCents: 96, totalChargedCents: 200)
+        XCTAssertEqual(WeeklyUsageChartView.tooltipText(for: d, creditBased: false), "$0.96")
+        XCTAssertEqual(WeeklyUsageChartView.tooltipText(for: d, creditBased: true), "$0.96")
     }
 
     func testTooltipTextOnDemandDayRoundsCentsToTwoDecimals() {
-        let day = DayUsage(date: Date(), requests: 10, isToday: false, isOnDemand: true, onDemandCents: 4000)
-        XCTAssertEqual(WeeklyUsageChartView.tooltipText(for: day), "$40.00")
+        let d = day(requests: 10, isOnDemand: true, onDemandCents: 4000)
+        XCTAssertEqual(WeeklyUsageChartView.tooltipText(for: d, creditBased: false), "$40.00")
+    }
+
+    // #72 — token-based enterprise plan: plan-day tooltip switches to dollars
+    // (matches the popover's `$used / $limit` denominator).
+
+    func testTooltipTextPlanDayTokenBasedShowsDollars() {
+        let d = day(requests: 929, totalChargedCents: 520)
+        XCTAssertEqual(WeeklyUsageChartView.tooltipText(for: d, creditBased: true), "$5.20")
+    }
+
+    func testTooltipTextPlanDayTokenBasedZeroCents() {
+        let d = day(requests: 0, totalChargedCents: 0)
+        XCTAssertEqual(WeeklyUsageChartView.tooltipText(for: d, creditBased: true), "$0.00")
+    }
+
+    // MARK: - sevenDayRolling — totalChargedCents accumulates across all kinds (#72)
+
+    func testSevenDayRollingTotalChargedCentsSumsAllKinds() {
+        let included = event("2026-05-13", cost: 10)                              // plan: chargedCents nil → 0
+        let onDemand = onDemandEvent("2026-05-13", cost: 5, charged: 250)         // 250
+        let freeCredit = UsageEvent(
+            timestamp: String(Int(date("2026-05-13").timeIntervalSince1970 * 1000) + 1000),
+            requestsCosts: 3,
+            kind: "USAGE_EVENT_KIND_FREE_CREDIT",
+            chargedCents: 80
+        )
+        let days = [included, onDemand, freeCredit].sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
+        XCTAssertEqual(days[6].totalChargedCents, 330, "0 + 250 + 80 = 330 across all kinds")
+        XCTAssertEqual(days[6].onDemandCents, 250, "only USAGE_BASED contributes to onDemandCents")
+    }
+
+    func testSevenDayRollingTotalChargedCentsZeroOnEmptyDay() {
+        let days = ([] as [UsageEvent]).sevenDayRolling(today: date("2026-05-13"), calendar: utcCalendar)
+        XCTAssertTrue(days.allSatisfy { $0.totalChargedCents == 0 })
     }
 
     // MARK: - oldestEventDate

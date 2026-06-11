@@ -7,6 +7,10 @@ import AppKit
 final class WeeklyUsageChartView: NSView {
     private var days: [DayUsage] = []
     private var style: WeeklyChartStyle = .outline
+    /// True when the active plan denominates usage in dollars (token-based
+    /// enterprise). Drives tooltip unit for plan-covered days — see
+    /// `tooltipText(for:creditBased:)` (#72).
+    private var creditBased: Bool = false
     private var hoverIndex: Int?
     private var trackingArea: NSTrackingArea?
 
@@ -18,11 +22,19 @@ final class WeeklyUsageChartView: NSView {
     }()
 
     /// Renders the hover tooltip label in the unit matching that day's billing
-    /// mode: dollars for on-demand days (real money charged), raw weighted-unit
-    /// integer for plan days (matches Cursor's `Requests: X/Y` denominator).
-    nonisolated static func tooltipText(for day: DayUsage) -> String {
+    /// mode and the active plan's denominator:
+    /// - On-demand day → on-demand cents charged (`$X.XX`)
+    /// - Plan day, token-based enterprise (`creditBased == true`) → total cents
+    ///   consumed across all events that day (`$X.XX`) — matches the popover's
+    ///   `$used / $limit` denominator.
+    /// - Plan day, request-quota plan → raw weighted-unit integer
+    ///   (matches Cursor's `Requests: X/Y` denominator).
+    nonisolated static func tooltipText(for day: DayUsage, creditBased: Bool) -> String {
         if day.isOnDemand {
             return String(format: "$%.2f", Double(day.onDemandCents) / 100)
+        }
+        if creditBased {
+            return String(format: "$%.2f", Double(day.totalChargedCents) / 100)
         }
         return "\(day.requests)"
     }
@@ -35,9 +47,10 @@ final class WeeklyUsageChartView: NSView {
 
     required init?(coder: NSCoder) { nil }
 
-    func update(days: [DayUsage], style: WeeklyChartStyle) {
+    func update(days: [DayUsage], style: WeeklyChartStyle, creditBased: Bool) {
         self.days = days
         self.style = style
+        self.creditBased = creditBased
         self.hoverIndex = nil
         needsDisplay = true
     }
@@ -183,7 +196,7 @@ final class WeeklyUsageChartView: NSView {
     private func drawHoverTooltip(in ctx: CGContext, chart: NSRect, yMax: Double) {
         guard let idx = hoverIndex else { return }
         let day = days[idx]
-        let text = NSAttributedString(string: Self.tooltipText(for: day), attributes: [
+        let text = NSAttributedString(string: Self.tooltipText(for: day, creditBased: creditBased), attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium),
             .foregroundColor: NSColor.white,
         ])

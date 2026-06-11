@@ -466,7 +466,8 @@ final class MenuBarPopoverViewController: NSViewController {
         {
             weeklyChartView.update(
                 days: weekly,
-                style: viewModel.weeklyChartStyle
+                style: viewModel.weeklyChartStyle,
+                creditBased: data.isCreditBased
             )
             setWeeklyChartVisible(true)
         } else {
