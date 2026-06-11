@@ -578,6 +578,118 @@ final class UsageDisplayDataTests: XCTestCase {
         XCTAssertEqual(decoded.hardLimit, 3000)
     }
 
+    // MARK: - Token-based enterprise: personal on-demand (#71)
+
+    /// Personal on-demand = spend beyond the included limit, against the member's
+    /// per-seat cap. $0 until included is exhausted → "$0.00 / $40.00".
+    func test_tokenEnterprise_personalOnDemand_zeroUntilIncludedExhausted() {
+        let summary = makeSummaryResponse(
+            billingCycleEnd: "2099-07-09T00:00:00.000Z",
+            membershipType: "enterprise",
+            overallUsed: 223 // $2.23 of $100 included
+        )
+        let usage = makeUsageResponse(numRequests: 0, maxRequestUsage: nil)
+        let data = UsageDisplayData.from(
+            summary: summary, usage: usage,
+            userInfo: UserInfoResponse(email: "ent@11st.com", name: "Woojin"),
+            perUserMonthlyLimitDollars: 100,
+            perUserOnDemandLimitDollars: 40)
+
+        XCTAssertEqual(data.onDemandUsedCents, 0)
+        XCTAssertEqual(data.onDemandLimitCents, 4000)
+        XCTAssertTrue(data.hasOnDemand)
+        XCTAssertEqual(data.onDemandText, "$0.00 / $40.00")
+    }
+
+    /// Once included ($100) is exceeded, the overflow shows as on-demand spend.
+    func test_tokenEnterprise_personalOnDemand_overflowAboveIncluded() {
+        let summary = makeSummaryResponse(
+            billingCycleEnd: "2099-07-09T00:00:00.000Z",
+            membershipType: "enterprise",
+            overallUsed: 12000 // $120 — $20 past the $100 included
+        )
+        let usage = makeUsageResponse(numRequests: 0, maxRequestUsage: nil)
+        let data = UsageDisplayData.from(
+            summary: summary, usage: usage,
+            userInfo: UserInfoResponse(email: "ent@11st.com", name: "Woojin"),
+            perUserMonthlyLimitDollars: 100,
+            perUserOnDemandLimitDollars: 40)
+
+        XCTAssertEqual(data.onDemandUsedCents, 2000) // $20.00 overflow
+        XCTAssertEqual(data.onDemandText, "$20.00 / $40.00")
+    }
+
+    /// No per-seat cap resolved → hide the on-demand row rather than fall back to
+    /// the misleading team-wide figure.
+    func test_tokenEnterprise_noOnDemandCap_hidesRow() {
+        let summary = makeSummaryResponse(
+            billingCycleEnd: "2099-07-09T00:00:00.000Z",
+            membershipType: "enterprise",
+            overallUsed: 223
+        )
+        let usage = makeUsageResponse(numRequests: 0, maxRequestUsage: nil)
+        let data = UsageDisplayData.from(
+            summary: summary, usage: usage,
+            userInfo: UserInfoResponse(email: "ent@11st.com", name: "Woojin"),
+            perUserMonthlyLimitDollars: 100,
+            perUserOnDemandLimitDollars: nil)
+
+        XCTAssertNil(data.onDemandLimitCents)
+        XCTAssertFalse(data.hasOnDemand)
+    }
+
+    /// Token-based members must NOT show the team-wide `teamUsage.onDemand`.
+    func test_tokenEnterprise_ignoresTeamOnDemand() {
+        let summary = UsageSummaryResponse(
+            billingCycleStart: "2026-06-09T00:00:00.000Z",
+            billingCycleEnd: "2099-07-09T00:00:00.000Z",
+            membershipType: "enterprise",
+            limitType: "team",
+            isUnlimited: false,
+            autoModelSelectedDisplayMessage: "You've used 0% of your included total usage",
+            individualUsage: IndividualUsage(
+                plan: nil, onDemand: nil,
+                overall: OverallUsage(enabled: true, used: 223, limit: 10000, remaining: 9777)),
+            teamUsage: TeamUsage(onDemand: OnDemandUsage(
+                enabled: true, used: 26192, limit: 300000, remaining: 273808))
+        )
+        let usage = makeUsageResponse(numRequests: 0, maxRequestUsage: nil)
+        let data = UsageDisplayData.from(
+            summary: summary, usage: usage,
+            userInfo: UserInfoResponse(email: "ent@11st.com", name: "Woojin"),
+            perUserMonthlyLimitDollars: 100,
+            perUserOnDemandLimitDollars: 40)
+
+        XCTAssertEqual(data.onDemandLimitCents, 4000, "Must be personal $40, not team $3000")
+        XCTAssertNotEqual(data.onDemandLimitCents, 300000)
+        XCTAssertEqual(data.onDemandUsedCents, 0, "Must be personal $0, not team $261.92")
+    }
+
+    /// `overall.limit`, when populated, sources the included limit without the
+    /// hard-limit endpoint.
+    func test_tokenEnterprise_usesOverallLimitWhenPresent() {
+        let summary = UsageSummaryResponse(
+            billingCycleStart: nil,
+            billingCycleEnd: "2099-07-09T00:00:00.000Z",
+            membershipType: "enterprise",
+            limitType: "team",
+            isUnlimited: false,
+            autoModelSelectedDisplayMessage: nil,
+            individualUsage: IndividualUsage(
+                plan: nil, onDemand: nil,
+                overall: OverallUsage(enabled: true, used: 223, limit: 10000, remaining: 9777)),
+            teamUsage: nil
+        )
+        let usage = makeUsageResponse(numRequests: 0, maxRequestUsage: nil)
+        // No perUserMonthlyLimitDollars passed — limit must come from overall.limit
+        let data = UsageDisplayData.from(
+            summary: summary, usage: usage,
+            userInfo: UserInfoResponse(email: "ent@11st.com", name: "Woojin"))
+
+        XCTAssertTrue(data.isCreditBased)
+        XCTAssertEqual(data.usageText, "$2.23 / $100.00")
+    }
+
     func test_fromSummary_creditBased_ignoresDisplayMessage() {
         let summary = makeSummaryResponse(
             billingCycleEnd: "2099-07-09T00:00:00.000Z",

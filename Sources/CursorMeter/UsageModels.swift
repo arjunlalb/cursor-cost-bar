@@ -364,24 +364,54 @@ struct UsageDisplayData: Sendable {
         summary: UsageSummaryResponse,
         usage: UsageResponse?,
         userInfo: UserInfoResponse,
-        perUserMonthlyLimitDollars: Int? = nil
+        perUserMonthlyLimitDollars: Int? = nil,
+        perUserOnDemandLimitDollars: Int? = nil
     ) -> UsageDisplayData {
         let model = usage?.primaryModel
         let isRequestBased = model?.maxRequestUsage != nil
         let resetDate = parseDate(summary.billingCycleEnd)
         let plan = summary.individualUsage?.plan
-        let onDemand = summary.individualUsage?.onDemand
-            ?? summary.teamUsage?.onDemand
 
         // Token-based enterprise contracts ship no `plan` object: spend lives in
-        // `individualUsage.overall.used` (cents) and the per-seat limit in the
-        // separate hard-limit endpoint (whole dollars). Synthesize a credit-style
-        // plan from them so the popover mirrors Cursor's dashboard ($used / $limit).
-        // `??` keeps every existing path intact — a real `plan` always wins.
+        // `individualUsage.overall.used` (cents) and the per-seat limit in either
+        // `overall.limit` (eventually populated) or the hard-limit endpoint
+        // (whole dollars). Synthesize a credit-style plan from them so the popover
+        // mirrors Cursor's dashboard ($used / $limit). `??` keeps every existing
+        // path intact — a real `plan` always wins.
         let overall = summary.individualUsage?.overall
+        let isTokenBased = plan == nil && overall != nil
         let planUsedCents = plan?.used ?? overall?.used
         let planLimitCents = plan?.limit
+            ?? overall?.limit
             ?? perUserMonthlyLimitDollars.map { $0 * 100 }
+
+        // On-demand. Non-token plans use the API's on-demand block (team-wide on
+        // enterprise). Token-based members instead get a PERSONAL view: spend
+        // beyond the included limit (overflow, $0 until included is exhausted)
+        // against their per-seat cap. NOTE: overflow saturates if the API caps
+        // `overall.used` at its limit — acceptable while included is far from
+        // exhausted; revisit via on-demand event summing if it ever matters.
+        let onDemandUsedCents: Int?
+        let onDemandLimitCents: Int?
+        let onDemandEnabled: Bool?
+        if isTokenBased {
+            onDemandLimitCents = perUserOnDemandLimitDollars.map { $0 * 100 }
+            if let limit = planLimitCents, onDemandLimitCents != nil {
+                onDemandUsedCents = max(0, (planUsedCents ?? 0) - limit)
+                onDemandEnabled = true
+            } else {
+                // No included limit or no per-seat cap resolved → hide the row
+                // rather than show the misleading team-wide figure.
+                onDemandUsedCents = nil
+                onDemandEnabled = nil
+            }
+        } else {
+            let onDemand = summary.individualUsage?.onDemand
+                ?? summary.teamUsage?.onDemand
+            onDemandUsedCents = onDemand?.used
+            onDemandLimitCents = onDemand?.limit
+            onDemandEnabled = onDemand?.enabled
+        }
 
         return UsageDisplayData(
             email: userInfo.email ?? "Unknown",
@@ -393,9 +423,9 @@ struct UsageDisplayData: Sendable {
                 ?? Self.percent(from: summary.autoModelSelectedDisplayMessage),
             requestsUsed: isRequestBased ? requestCount(model) : 0,
             requestsLimit: isRequestBased ? (model?.maxRequestUsage ?? 0) : 0,
-            onDemandUsedCents: onDemand?.used,
-            onDemandLimitCents: onDemand?.limit,
-            onDemandEnabled: onDemand?.enabled,
+            onDemandUsedCents: onDemandUsedCents,
+            onDemandLimitCents: onDemandLimitCents,
+            onDemandEnabled: onDemandEnabled,
             isOnDemandActive: false,
             cycleStartDate: parseDate(summary.billingCycleStart),
             resetDate: resetDate,

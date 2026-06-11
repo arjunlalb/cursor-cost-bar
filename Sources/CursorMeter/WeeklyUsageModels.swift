@@ -78,7 +78,9 @@ struct Team: Codable, Sendable {
     let name: String?
 }
 
-// MARK: - API Response: /api/dashboard/get-team-spend (used solely to discover numeric userId)
+// MARK: - API Response: /api/dashboard/get-team-spend
+// Discovers the numeric userId (for the weekly chart) and, on token-based
+// enterprise contracts, the member's per-seat on-demand limit.
 
 struct TeamSpendResponse: Codable, Sendable {
     let teamMemberSpend: [TeamMember]
@@ -87,6 +89,9 @@ struct TeamSpendResponse: Codable, Sendable {
 struct TeamMember: Codable, Sendable {
     let userId: Int
     let email: String?
+    /// Per-seat on-demand (usage-based) spend cap in whole dollars. An admin
+    /// override of the team default (`hardLimitPerUser`); nil when unset.
+    let hardLimitOverrideDollars: Int?
 }
 
 // MARK: - 7-day rolling display model

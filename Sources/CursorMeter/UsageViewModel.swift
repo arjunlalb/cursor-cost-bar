@@ -160,6 +160,11 @@ final class UsageViewModel {
     /// Discovered from `/api/dashboard/get-team-spend` and cached across refreshes.
     private var cachedUserId: Int?
 
+    /// Per-seat on-demand limit (whole dollars) for token-based enterprise plans,
+    /// from the team-spend roster. Cached across refreshes (heavier fetch); feeds
+    /// the personal on-demand row. nil when unset or not applicable.
+    private var cachedOnDemandLimitDollars: Int?
+
     /// Last observed billing-cycle start. Used to detect cycle rollover so we
     /// can clear the threshold-notification dedup set and let the user know
     /// when usage crosses 80/90 in the new cycle.
@@ -209,6 +214,7 @@ final class UsageViewModel {
     private func resetPerAccountState() {
         cachedTeamId = nil
         cachedUserId = nil
+        cachedOnDemandLimitDollars = nil
         weeklyData = nil
         isEnterpriseTeam = false
         previousCycleStart = nil
@@ -253,9 +259,7 @@ final class UsageViewModel {
                 makeOptimisticWeeklyTask(cookieHeader: cookieHeader)
 
             // Optimistic hard-limit fetch — same prior-refresh teamId gating as
-            // the weekly task. On the first refresh (teamId unknown) this is nil
-            // and token-based plans fall back to percent-only until the next
-            // refresh, once `refreshWeeklyChart` has cached the teamId.
+            // the weekly task. Runs in parallel once a teamId is cached.
             let optimisticHardLimit: Task<HardLimitResponse?, Never>? =
                 makeOptimisticHardLimitTask(cookieHeader: cookieHeader)
 
@@ -263,13 +267,43 @@ final class UsageViewModel {
 
             let summary = try? await summaryResult
             let usage = try? await usageResult
-            let hardLimit: HardLimitResponse? = await optimisticHardLimit?.value ?? nil
+
+            // Resolve per-seat limits for token-based enterprise plans (no `plan`
+            // object). The monthly limit feeds the credit-style $used/$limit
+            // display; the on-demand limit feeds the PERSONAL on-demand row
+            // (replacing the misleading team-wide figure). Monthly limit uses the
+            // optimistic hard-limit task (parallel); the on-demand limit is cached
+            // for the session since team-spend is a heavier roster fetch. First
+            // refresh resolves both synchronously so values appear immediately.
+            var perUserMonthlyLimitDollars =
+                (await optimisticHardLimit?.value ?? nil)?.perUserMonthlyLimitDollars
+            var perUserOnDemandLimitDollars = cachedOnDemandLimitDollars
+            let isTokenBased = summary.map {
+                $0.individualUsage?.plan == nil && $0.individualUsage?.overall != nil
+            } ?? false
+            if isTokenBased,
+               perUserMonthlyLimitDollars == nil || perUserOnDemandLimitDollars == nil,
+               let teamId = await resolveTeamId(cookieHeader: cookieHeader) {
+                if perUserMonthlyLimitDollars == nil {
+                    perUserMonthlyLimitDollars = (try? await apiClient
+                        .fetchHardLimit(cookieHeader: cookieHeader, teamId: teamId))?
+                        .perUserMonthlyLimitDollars
+                }
+                if perUserOnDemandLimitDollars == nil,
+                   let member = await fetchMyTeamMember(
+                       cookieHeader: cookieHeader, teamId: teamId, email: userInfo.email) {
+                    if cachedUserId == nil { cachedUserId = member.userId }
+                    perUserOnDemandLimitDollars = member.hardLimitOverrideDollars
+                    cachedOnDemandLimitDollars = perUserOnDemandLimitDollars
+                }
+            }
 
             let baseData: UsageDisplayData?
             if let summary {
                 baseData = UsageDisplayData.from(
                     summary: summary, usage: usage, userInfo: userInfo,
-                    perUserMonthlyLimitDollars: hardLimit?.perUserMonthlyLimitDollars)
+                    perUserMonthlyLimitDollars: perUserMonthlyLimitDollars,
+                    perUserOnDemandLimitDollars: perUserOnDemandLimitDollars)
             } else if let usage {
                 baseData = UsageDisplayData.from(usage: usage, userInfo: userInfo)
             } else {
@@ -410,6 +444,43 @@ final class UsageViewModel {
         }
     }
 
+    /// Discovers and caches the active `teamId` (once per session). Returns nil
+    /// on personal plans (teams fetch empty / non-200), which callers treat as
+    /// non-enterprise. Shared by the hard-limit and weekly-chart paths.
+    private func resolveTeamId(cookieHeader: String) async -> Int? {
+        if cachedTeamId == nil {
+            do {
+                let teams = try await apiClient.fetchTeams(cookieHeader: cookieHeader)
+                cachedTeamId = teams.teams.first?.id
+            } catch {
+                Log.info("Teams fetch failed (treating as non-enterprise): \(error.localizedDescription)")
+            }
+        }
+        return cachedTeamId
+    }
+
+    /// Fetches the team-spend roster and returns the current user's row (matched
+    /// by email). Source of the numeric userId and the per-seat on-demand limit.
+    /// Returns nil on missing email or fetch failure.
+    private func fetchMyTeamMember(
+        cookieHeader: String, teamId: Int, email: String?
+    ) async -> TeamMember? {
+        guard let email, !email.isEmpty else {
+            Log.info("Skipping team-spend lookup: userInfo email missing or empty")
+            return nil
+        }
+        do {
+            let spend = try await apiClient.fetchTeamSpend(cookieHeader: cookieHeader, teamId: teamId)
+            let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return spend.teamMemberSpend.first {
+                ($0.email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) == normalized
+            }
+        } catch {
+            Log.info("Team-spend fetch failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     /// Fires the hard-limit fetch in parallel when a teamId was cached by a
     /// prior refresh. Returns nil on the first refresh (no teamId yet) or on any
     /// fetch error — callers treat a nil result as "no member-visible limit".
@@ -467,6 +538,7 @@ final class UsageViewModel {
             Log.info("Weekly fetch returned 403 — clearing enterprise cache")
             cachedTeamId = nil
             cachedUserId = nil
+            cachedOnDemandLimitDollars = nil
             isEnterpriseTeam = false
             weeklyData = nil
         } catch {
@@ -488,36 +560,17 @@ final class UsageViewModel {
             return
         }
 
-        // Discover team id if absent.
-        if cachedTeamId == nil {
-            do {
-                let teams = try await apiClient.fetchTeams(cookieHeader: cookieHeader)
-                cachedTeamId = teams.teams.first?.id
-            } catch {
-                Log.info("Teams fetch failed (treating as non-enterprise): \(error.localizedDescription)")
-            }
-        }
-        guard let teamId = cachedTeamId else {
+        guard let teamId = await resolveTeamId(cookieHeader: cookieHeader) else {
             isEnterpriseTeam = false
             weeklyData = nil
             return
         }
 
-        // Discover numeric userId if absent. Matched by email against team-spend roster.
+        // Discover numeric userId if absent. Matched by email against team-spend
+        // roster (token-based refreshes may already have cached it).
         if cachedUserId == nil {
-            if let email = userInfo.email, !email.isEmpty {
-                do {
-                    let spend = try await apiClient.fetchTeamSpend(cookieHeader: cookieHeader, teamId: teamId)
-                    let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                    cachedUserId = spend.teamMemberSpend.first(where: {
-                        ($0.email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) == normalized
-                    })?.userId
-                } catch {
-                    Log.info("Team-spend fetch failed: \(error.localizedDescription)")
-                }
-            } else {
-                Log.info("Skipping team-spend discovery: userInfo email missing or empty")
-            }
+            cachedUserId = await fetchMyTeamMember(
+                cookieHeader: cookieHeader, teamId: teamId, email: userInfo.email)?.userId
         }
         guard let userId = cachedUserId else {
             isEnterpriseTeam = false
@@ -540,6 +593,7 @@ final class UsageViewModel {
             Log.info("Weekly fetch returned 403 — clearing enterprise cache")
             cachedTeamId = nil
             cachedUserId = nil
+            cachedOnDemandLimitDollars = nil
             isEnterpriseTeam = false
             weeklyData = nil
         } catch {
@@ -564,6 +618,7 @@ final class UsageViewModel {
         isEnterpriseTeam = false
         cachedTeamId = nil
         cachedUserId = nil
+        cachedOnDemandLimitDollars = nil
         previousCycleStart = nil
         isOnDemandLatched = false
         // Jump baselines must clear on logout so the next account's first
