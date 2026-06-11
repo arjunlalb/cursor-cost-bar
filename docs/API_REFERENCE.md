@@ -33,7 +33,9 @@ Response shape consumed by `UsageDisplayData.from(summary:)` (see `UsageModels.s
 - `serverPercentUsed` (Double) — for percent-only plans
 - `membershipType`, `isPercentOnly`, `isCreditBased`
 
-The `teamId` variant is observed when an enterprise team is active. CursorMeter currently calls the un-suffixed form; this is sufficient on personal accounts.
+The `teamId` variant is observed when an enterprise team is active. CursorMeter currently calls the un-suffixed form; this is sufficient on personal accounts. (Confirmed 2026-06: on a token-based enterprise member account the `?teamId=` response is byte-identical to the plain call.)
+
+**Token-based enterprise contracts** (`/api/dashboard/teams` → `pricingStrategy: "tokens"`, `adminOnlyUsagePricing: true`) expose **no numeric plan limit** to member accounts: there is no `plan` object (only `individualUsage.overall` with `limit: null`), and the included-usage percentage appears **only** as prose in `autoModelSelectedDisplayMessage` (e.g. `"You've used 0% of your included total usage"`). CursorMeter parses that percentage into `serverPercentUsed` so the primary row renders percent-only instead of `0 / 0`; on-demand spend still comes from `teamUsage.onDemand`. See issue #71.
 
 ### `GET /api/usage?user=<sub>`
 

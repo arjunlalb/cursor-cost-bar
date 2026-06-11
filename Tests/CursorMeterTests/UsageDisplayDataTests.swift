@@ -464,6 +464,96 @@ final class UsageDisplayDataTests: XCTestCase {
         XCTAssertEqual(data.menuBarLimitText, "")
     }
 
+    // MARK: - Token-based enterprise (percent parsed from display message)
+
+    /// Regression for issue #71: token-based enterprise members get no numeric
+    /// plan limit, so the primary row used to render a meaningless `0 / 0`.
+    /// The included-usage percent is parsed from the display message instead.
+    func test_fromSummary_tokenEnterprise_showsPercentNotZeroZero() {
+        let summary = makeSummaryResponse(
+            billingCycleEnd: "2099-07-09T00:00:00.000Z",
+            membershipType: "enterprise",
+            autoMessage: "You've used 0% of your included total usage"
+        )
+        // maxRequestUsage nil → not request-based; no plan → not credit-based
+        let usage = makeUsageResponse(numRequests: 0, maxRequestUsage: nil)
+        let userInfo = UserInfoResponse(email: "ent@11st.com", name: "Woojin")
+
+        let data = UsageDisplayData.from(summary: summary, usage: usage, userInfo: userInfo)
+
+        XCTAssertTrue(data.isPercentOnly)
+        XCTAssertEqual(data.usageText, "0%", "Must not render 0 / 0")
+        XCTAssertEqual(data.usageLabel, "Plan Usage")
+        XCTAssertEqual(data.menuBarUsedText, "0%")
+        XCTAssertEqual(data.menuBarLimitText, "")
+    }
+
+    func test_fromSummary_tokenEnterprise_nonZeroPercent() {
+        let summary = makeSummaryResponse(
+            billingCycleEnd: "2099-07-09T00:00:00.000Z",
+            membershipType: "enterprise",
+            autoMessage: "You've used 37% of your included total usage"
+        )
+        let usage = makeUsageResponse(numRequests: 0, maxRequestUsage: nil)
+        let userInfo = UserInfoResponse(email: "ent@11st.com", name: "Woojin")
+
+        let data = UsageDisplayData.from(summary: summary, usage: usage, userInfo: userInfo)
+
+        XCTAssertEqual(data.percentUsed, 37.0, accuracy: 0.01)
+        XCTAssertEqual(data.usageText, "37%")
+    }
+
+    /// Accepted residual: with no parseable percent we fall back to `0 / 0`
+    /// rather than inventing a number (documented in issue #71).
+    func test_fromSummary_tokenEnterprise_noMessageFallsBackToRequests() {
+        let summary = makeSummaryResponse(
+            billingCycleEnd: "2099-07-09T00:00:00.000Z",
+            membershipType: "enterprise",
+            autoMessage: nil
+        )
+        let usage = makeUsageResponse(numRequests: 0, maxRequestUsage: nil)
+        let userInfo = UserInfoResponse(email: "ent@11st.com", name: "Woojin")
+
+        let data = UsageDisplayData.from(summary: summary, usage: usage, userInfo: userInfo)
+
+        XCTAssertFalse(data.isPercentOnly)
+        XCTAssertEqual(data.usageText, "0 / 0")
+    }
+
+    func test_fromSummary_creditBased_ignoresDisplayMessage() {
+        let summary = makeSummaryResponse(
+            billingCycleEnd: "2099-07-09T00:00:00.000Z",
+            membershipType: "pro",
+            planUsed: 800,
+            planLimit: 2000,
+            autoMessage: "You've used 50% of your included total usage"
+        )
+        let usage = makeUsageResponse(numRequests: 0, maxRequestUsage: nil)
+        let userInfo = UserInfoResponse(email: "pro@test.com", name: "Pro")
+
+        let data = UsageDisplayData.from(summary: summary, usage: usage, userInfo: userInfo)
+
+        XCTAssertTrue(data.isCreditBased)
+        XCTAssertFalse(data.isPercentOnly)
+        XCTAssertEqual(data.usageText, "$8.00 / $20.00", "Credit calc must win over message")
+        XCTAssertEqual(data.percentUsed, 40.0, accuracy: 0.01)
+    }
+
+    func test_fromSummary_requestBased_ignoresDisplayMessage() {
+        let summary = makeSummaryResponse(
+            billingCycleEnd: "2099-07-09T00:00:00.000Z",
+            membershipType: "enterprise",
+            autoMessage: "You've used 99% of your included total usage"
+        )
+        let usage = makeUsageResponse(numRequests: 42, maxRequestUsage: 500)
+        let userInfo = UserInfoResponse(email: "ent@test.com", name: "Ent")
+
+        let data = UsageDisplayData.from(summary: summary, usage: usage, userInfo: userInfo)
+
+        XCTAssertFalse(data.isPercentOnly)
+        XCTAssertEqual(data.usageText, "42 / 500")
+    }
+
     // MARK: - hasOnDemand (OnDemandUsage.enabled plumbing)
 
     func test_hasOnDemand_falseWhenEnabledFalse() {
@@ -680,6 +770,7 @@ final class UsageDisplayDataTests: XCTestCase {
             membershipType: "enterprise",
             limitType: nil,
             isUnlimited: false,
+            autoModelSelectedDisplayMessage: nil,
             individualUsage: IndividualUsage(plan: nil, onDemand: nil),
             teamUsage: TeamUsage(onDemand: OnDemandUsage(
                 enabled: true, used: 584, limit: 4000, remaining: 3416))
@@ -793,7 +884,8 @@ final class UsageDisplayDataTests: XCTestCase {
         membershipType: String? = nil,
         planUsed: Int? = nil,
         planLimit: Int? = nil,
-        totalPercentUsed: Double? = nil
+        totalPercentUsed: Double? = nil,
+        autoMessage: String? = nil
     ) -> UsageSummaryResponse {
         let plan: PlanUsage? = (planUsed != nil || planLimit != nil || totalPercentUsed != nil)
             ? PlanUsage(enabled: true, used: planUsed, limit: planLimit, remaining: nil, totalPercentUsed: totalPercentUsed)
@@ -807,6 +899,7 @@ final class UsageDisplayDataTests: XCTestCase {
             membershipType: membershipType,
             limitType: nil,
             isUnlimited: nil,
+            autoModelSelectedDisplayMessage: autoMessage,
             individualUsage: individual,
             teamUsage: nil
         )

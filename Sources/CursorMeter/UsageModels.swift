@@ -60,6 +60,11 @@ struct UsageSummaryResponse: Codable, Sendable {
     let membershipType: String?
     let limitType: String?
     let isUnlimited: Bool?
+    /// Sentence like "You've used 0% of your included total usage". On
+    /// token-based enterprise contracts the included-usage percentage is
+    /// exposed ONLY here — there is no numeric `plan` limit for members
+    /// (`adminOnlyUsagePricing`). Parsed into `serverPercentUsed` as a fallback.
+    let autoModelSelectedDisplayMessage: String?
     let individualUsage: IndividualUsage?
     let teamUsage: TeamUsage?
 }
@@ -318,6 +323,18 @@ struct UsageDisplayData: Sendable {
         model?.numRequestsTotal ?? model?.numRequests ?? 0
     }
 
+    /// Extracts a leading integer percentage from Cursor's display message
+    /// ("You've used 0% of your included total usage" → 0). Returns nil when
+    /// no `N%` token is present. Lets token-based enterprise plans — which
+    /// expose included usage only as this sentence — render via percent-only
+    /// mode instead of a meaningless `0 / 0`.
+    private static func percent(from message: String?) -> Double? {
+        guard let message,
+              let match = message.range(of: #"\d+%"#, options: .regularExpression)
+        else { return nil }
+        return Double(message[match].dropLast())
+    }
+
     // MARK: - Factory: summary (primary) + usage (supplementary)
 
     static func from(
@@ -338,7 +355,8 @@ struct UsageDisplayData: Sendable {
             membershipType: summary.membershipType,
             planUsedCents: isRequestBased ? nil : plan?.used,
             planLimitCents: isRequestBased ? nil : plan?.limit,
-            serverPercentUsed: plan?.totalPercentUsed,
+            serverPercentUsed: plan?.totalPercentUsed
+                ?? Self.percent(from: summary.autoModelSelectedDisplayMessage),
             requestsUsed: isRequestBased ? requestCount(model) : 0,
             requestsLimit: isRequestBased ? (model?.maxRequestUsage ?? 0) : 0,
             onDemandUsedCents: onDemand?.used,
