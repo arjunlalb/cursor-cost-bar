@@ -53,6 +53,7 @@ AppKit 컨텍스트라 글로벌 CLAUDE.md의 Playwright/Magic MCP UI workflow�
 - `release.yml` (tag push) auto-generates body. For curated notes, after workflow completes: `gh release edit <tag> --notes-file <path>` to overwrite
 - **Pre-release / beta tags** (e.g. `v0.4.0-beta.1`): `release.yml` does not auto-mark as prerelease. After workflow completes: `gh release edit <tag> --prerelease`. GitHub's `/releases/latest` API auto-excludes prereleases, so `UpdateChecker` won't notify existing stable users
 - Roll back a not-yet-distributed release (download_count ≈ 0) and re-tag same version: `gh release delete <tag> --cleanup-tag` then `git fetch --prune --prune-tags origin`
+- **Notes tone — user-facing impact only.** Each item must pass the "how does this change what the user experiences?" filter. Skip CI/infra changes, internal refactors, doc updates, action-SHA pinning, test workflow tweaks. Security wins → one-line summary + `SECURITY.md` link, not a bullet list. Internal-only changes are already covered by the Full Changelog link at the bottom.
 
 ## Architecture
 
