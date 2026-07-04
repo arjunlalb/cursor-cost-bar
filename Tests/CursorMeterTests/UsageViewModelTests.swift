@@ -68,6 +68,24 @@ final class UsageViewModelTests: XCTestCase {
         XCTAssertTrue(UsageViewModel.hasUnauthorized([URLError(.timedOut), APIError.unauthorized]))
     }
 
+    // MARK: - shouldRecheckUpdate (#80)
+
+    func testShouldRecheckUpdateWhenNeverChecked() {
+        XCTAssertTrue(UsageViewModel.shouldRecheckUpdate(lastCheck: nil, now: Date()))
+    }
+
+    func testShouldRecheckUpdateAfterInterval() {
+        let now = Date(timeIntervalSince1970: 200_000)
+        let old = now.addingTimeInterval(-(UsageViewModel.updateRecheckInterval + 1))
+        XCTAssertTrue(UsageViewModel.shouldRecheckUpdate(lastCheck: old, now: now))
+    }
+
+    func testShouldNotRecheckUpdateWithinInterval() {
+        let now = Date(timeIntervalSince1970: 200_000)
+        let recent = now.addingTimeInterval(-3_600)
+        XCTAssertFalse(UsageViewModel.shouldRecheckUpdate(lastCheck: recent, now: now))
+    }
+
     // MARK: - On-demand latch
 
     @MainActor
