@@ -24,10 +24,13 @@ cp -r CursorMeter.app /Applications/  # 4. Copy new bundle
 open /Applications/CursorMeter.app    # 5. Launch
 ```
 
+- Local builds stamp version 0.1.0 (always shows "Update available"); only `release.yml` injects the tag version
+
 ## Log Inspection
 
 - `log` is a zsh builtin — use `/usr/bin/log` to invoke macOS unified logging
 - `Log.info` entries require `--info --debug` flags: `/usr/bin/log show --predicate 'subsystem == "com.cursormeter"' --info --debug --last 5m`
+- Simulate session expiry: `security add-generic-password -U -s com.cursormeter.session -a cursor-cookie-header -w "WorkosCursorSessionToken=INVALID"` → relaunch
 
 ## Issue Workflow
 
@@ -96,4 +99,5 @@ Two undocumented endpoints used (cookie-based auth, no official schema):
 - `URLSessionConfiguration.ephemeral` — no disk cache (also applies to `UpdateChecker`)
 - Keychain via standard macOS Keychain (Data Protection Keychain requires entitlements unavailable to ad-hoc signed apps)
 - WebView host whitelist enforced in both `decidePolicyFor navigationAction` and `decidePolicyFor navigationResponse`. Policy detail (two-tier exact + suffix list, ccTLD coverage, accepted residual risk) lives in `SECURITY.md`
-- `UsageViewModel` uses `@Observable` (not `@Published`); observers must use `withObservationTracking` + re-arm pattern, not Combine `sink`
+- `UsageViewModel` uses `@Observable` (not `@Published`); observers must use `withObservationTracking` + re-arm pattern, not Combine `sink`. New observable state read by UI must also be added to the tracking blocks in `CursorMeterApp` — otherwise UI silently never updates
+- Tests must never call `UNUserNotificationCenter.current()` (crashes in SPM test host) or touch the real Keychain — use `UsageViewModel` seams: `init(apiClient:)`+MockURLProtocol, `keychainDeleteHandler`, `sessionExpiredNotifier`, `testHook_setCookieHeader`
