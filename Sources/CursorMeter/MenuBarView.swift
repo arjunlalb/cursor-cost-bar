@@ -63,6 +63,17 @@ final class MenuBarPopoverViewController: NSViewController {
     private let updateButton     = NSButton()
     private var updateURL: URL?
 
+    // Stale-data indicator (hidden unless viewModel.isDataStale) (#77)
+    private let staleLabel       = NSTextField(labelWithString: "")
+    // Explicit MainActor isolation: DateFormatter is mutable/non-Sendable and
+    // CI's stricter Sendable checking may not infer isolation for statics.
+    @MainActor private static let staleTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.timeStyle = .short
+        f.dateStyle = .none
+        return f
+    }()
+
     // MARK: - Init
 
     init(viewModel: UsageViewModel, onLogin: @escaping () -> Void, onSettings: @escaping () -> Void) {
@@ -106,6 +117,15 @@ final class MenuBarPopoverViewController: NSViewController {
             applyStatus()
             statusStack.isHidden = false
             dataStack.isHidden   = true
+        }
+
+        // Stale-data indicator (#77)
+        if viewModel.isDataStale {
+            let timeString = viewModel.lastSuccessAt.map(Self.staleTimeFormatter.string(from:)) ?? "—"
+            staleLabel.stringValue = "⚠️ Last updated \(timeString) — retrying every \(viewModel.refreshInterval.label)"
+            staleLabel.isHidden = false
+        } else {
+            staleLabel.isHidden = true
         }
 
         // Update row
@@ -333,6 +353,12 @@ final class MenuBarPopoverViewController: NSViewController {
         bottomRow.addArrangedSubview(intervalButton)
 
         dataStack.addArrangedSubview(bottomRow)
+
+        // --- Stale-data indicator (hidden by default) ---
+        staleLabel.font      = NSFont.systemFont(ofSize: 11)
+        staleLabel.textColor = CircularProgressIcon.warnColor
+        staleLabel.isHidden  = true
+        dataStack.addArrangedSubview(staleLabel)
 
         // Make all rows in dataStack fill full width
         for arrangedView in dataStack.arrangedSubviews {
