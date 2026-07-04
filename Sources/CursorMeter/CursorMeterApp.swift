@@ -1,10 +1,11 @@
 import AppKit
+@preconcurrency import UserNotifications
 
 // MARK: - App Entry Point
 
 @main
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNotificationCenterDelegate {
 
     // MARK: - Properties
 
@@ -31,6 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+
+        UNUserNotificationCenter.current().delegate = self
 
         setupStatusItem()
         setupPopover()
@@ -252,6 +255,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) {
         // Covers both explicit hidePopover() and .transient auto-dismiss paths.
         removePopoverDismissMonitor()
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    /// Routes a clicked notification to the login window when it's the
+    /// session-expired banner (#79); other notifications keep the default
+    /// (no-op) click behavior since the app has no main window to activate into.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let identifier = response.notification.request.identifier
+        if NotificationManager.opensLoginWindow(forNotificationIdentifier: identifier) {
+            Task { @MainActor [weak self] in
+                NSApp.activate(ignoringOtherApps: true)
+                self?.showLogin()
+            }
+        }
+        completionHandler()
     }
 
     private func observePopover() {
