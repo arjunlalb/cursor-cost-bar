@@ -41,7 +41,7 @@ final class UsageViewModelTests: XCTestCase {
 
     /// Ensures the message never leaks raw error detail (URLs, debug strings).
     func testFallbackMessageDoesNotLeakRawDetail() {
-        let url = URL(string: "https://www.cursor.com/api/usage-summary")!
+        let url = URL(string: "https://cursor.com/api/usage-summary")!
         let urlError = URLError(.timedOut, userInfo: [NSURLErrorFailingURLErrorKey: url])
         let message = UsageViewModel.fallbackErrorMessage(for: urlError)
         XCTAssertFalse(message.contains("cursor.com"))

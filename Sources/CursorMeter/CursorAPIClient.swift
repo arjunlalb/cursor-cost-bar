@@ -8,13 +8,13 @@ enum APIError: Error {
 }
 
 actor CursorAPIClient {
-    private static let usageURL = URL(string: "https://www.cursor.com/api/usage")!
-    private static let usageSummaryURL = URL(string: "https://www.cursor.com/api/usage-summary")!
-    private static let userInfoURL = URL(string: "https://www.cursor.com/api/auth/me")!
-    private static let teamsURL = URL(string: "https://www.cursor.com/api/dashboard/teams")!
-    // Dashboard POST endpoints reject the `www.` host (308 redirect) when
-    // combined with `Origin: https://cursor.com` — the bare-host canonical URL
-    // is the only one that returns 200 for these CSRF-checked endpoints.
+    private static let usageURL = URL(string: "https://cursor.com/api/usage")!
+    private static let usageSummaryURL = URL(string: "https://cursor.com/api/usage-summary")!
+    private static let userInfoURL = URL(string: "https://cursor.com/api/auth/me")!
+    private static let teamsURL = URL(string: "https://cursor.com/api/dashboard/teams")!
+    // All endpoints now use the bare-host canonical URL. Dashboard POST endpoints
+    // enforce origin checks with `Origin: https://cursor.com` — the www. redirect
+    // would cause a CSRF rejection on state-changing operations.
     private static let filteredUsageEventsURL = URL(string: "https://cursor.com/api/dashboard/get-filtered-usage-events")!
     private static let teamSpendURL = URL(string: "https://cursor.com/api/dashboard/get-team-spend")!
     private static let hardLimitURL = URL(string: "https://cursor.com/api/dashboard/get-hard-limit")!
