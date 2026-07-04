@@ -90,4 +90,15 @@ final class CircularProgressIconTests: XCTestCase {
         let image = CircularProgressIcon.menuBarImageWithPercent(percent: 0)
         XCTAssertGreaterThan(image.size.width, 0)
     }
+
+    // MARK: - Login Required Image (#76)
+
+    func testLoginRequiredImageIsWiderThanIdle() {
+        // Badge overhangs the top-right corner — canvas must grow so it never clips.
+        let idle = CircularProgressIcon.idleImage()
+        let badged = CircularProgressIcon.loginRequiredImage()
+        XCTAssertGreaterThan(badged.size.width, idle.size.width)
+        XCTAssertEqual(badged.size.height, idle.size.height)
+        XCTAssertFalse(badged.isTemplate)
+    }
 }

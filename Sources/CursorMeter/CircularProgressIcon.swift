@@ -189,6 +189,47 @@ enum CircularProgressIcon {
         return image
     }
 
+    /// Idle logo + warning badge — shown when the stored session has expired
+    /// and the user must log in again. Distinct from `idleImage()` so the
+    /// expired state doesn't look identical to fresh-launch idle (#76,
+    /// docs/mockup-issue-76-login-icon.html candidate C).
+    ///
+    /// Composites the existing `idleImage()` rather than redrawing the logo —
+    /// the drawing handler re-runs at render time, so `labelColor` inside the
+    /// nested image stays appearance-dynamic.
+    static func loginRequiredImage() -> NSImage {
+        let logo = idleImage()
+        let badgeRadius: CGFloat = 4
+        // Badge overhangs the logo's top-right corner; widen the canvas so it never clips.
+        let size = NSSize(width: logo.size.width + badgeRadius, height: logo.size.height)
+
+        let image = NSImage(size: size, flipped: false) { _ in
+            logo.draw(
+                at: .zero, from: .zero, operation: .sourceOver, fraction: 1)
+
+            // Warning badge, top-right. Black "!" on warnColor reads in both
+            // light and dark menu bars.
+            let badgeCenter = NSPoint(x: size.width - badgeRadius, y: size.height - badgeRadius)
+            let badgeRect = NSRect(
+                x: badgeCenter.x - badgeRadius, y: badgeCenter.y - badgeRadius,
+                width: badgeRadius * 2, height: badgeRadius * 2)
+            warnColor.setFill()
+            NSBezierPath(ovalIn: badgeRect).fill()
+
+            let bang = NSAttributedString(string: "!", attributes: [
+                .font: NSFont.systemFont(ofSize: 7, weight: .heavy),
+                .foregroundColor: NSColor.black,
+            ])
+            let bangSize = bang.size()
+            bang.draw(at: NSPoint(
+                x: badgeCenter.x - bangSize.width / 2,
+                y: badgeCenter.y - bangSize.height / 2))
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
+
     /// Renders an emoji glyph centered in a fixed-size NSImage suitable for
     /// `NSStatusItem.button.image` swap. Used for the usage-jump effect.
     ///
