@@ -215,4 +215,13 @@ final class NotificationManager {
             identifier: Self.sessionExpiredIdentifier
         )
     }
+
+    // MARK: - Notification Click Routing (#79)
+
+    /// Pure routing decision for a clicked notification. Only the session-expired
+    /// banner should open the login window — threshold/usage-jump notifications
+    /// keep the default (no-op) click behavior.
+    nonisolated static func opensLoginWindow(forNotificationIdentifier id: String) -> Bool {
+        id == sessionExpiredIdentifier
+    }
 }

@@ -202,4 +202,30 @@ final class NotificationManagerTests: XCTestCase {
     // app bundle (the swift-test host has no bundle identifier). The body and
     // identifier-prefix tests above exercise the user-visible contract; the
     // remaining authorization/dispatch path is covered by manual smoke testing.
+
+    // MARK: - Notification Click Routing (#79)
+
+    func testSessionExpiredIdentifierOpensLoginWindow() {
+        XCTAssertTrue(
+            NotificationManager.opensLoginWindow(
+                forNotificationIdentifier: NotificationManager.sessionExpiredIdentifier
+            )
+        )
+    }
+
+    func testUUIDStyleIdentifierDoesNotOpenLoginWindow() {
+        XCTAssertFalse(
+            NotificationManager.opensLoginWindow(
+                forNotificationIdentifier: UUID().uuidString
+            )
+        )
+    }
+
+    func testUsageJumpIdentifierDoesNotOpenLoginWindow() {
+        XCTAssertFalse(
+            NotificationManager.opensLoginWindow(
+                forNotificationIdentifier: "\(NotificationManager.usageJumpIdentifierPrefix)-\(UUID().uuidString)"
+            )
+        )
+    }
 }
