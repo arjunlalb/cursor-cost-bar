@@ -163,6 +163,14 @@ actor CursorAPIClient {
             throw APIError.httpError(statusCode: httpResponse.statusCode)
         }
 
+        // Cursor answers an invalid/expired session with 204 No Content on
+        // /api/auth/me instead of 401 (verified 2026-07-03). Every endpoint
+        // here decodes JSON, so a 2xx with an empty body can never be a
+        // success — treat it as the session-expiry signal it is (#76).
+        if httpResponse.statusCode == 204 || data.isEmpty {
+            throw APIError.unauthorized
+        }
+
         return data
     }
 }

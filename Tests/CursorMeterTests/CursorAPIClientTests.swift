@@ -200,6 +200,42 @@ final class CursorAPIClientTests: XCTestCase {
         }
     }
 
+    // MARK: - Session expiry (#76)
+
+    func testFetchUserInfo204EmptyBodyThrowsUnauthorized() async {
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 204, httpVersion: nil, headerFields: nil)!
+            return (response, Data())
+        }
+
+        do {
+            _ = try await client.fetchUserInfo(cookieHeader: "session=expired")
+            XCTFail("Expected APIError.unauthorized")
+        } catch APIError.unauthorized {
+            // expected — 204 means anonymous/invalid session on /api/auth/me
+        } catch {
+            XCTFail("Expected APIError.unauthorized, got \(error)")
+        }
+    }
+
+    func testFetchUsageSummary200EmptyBodyThrowsUnauthorized() async {
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, Data())
+        }
+
+        do {
+            _ = try await client.fetchUsageSummary(cookieHeader: "session=expired")
+            XCTFail("Expected APIError.unauthorized")
+        } catch APIError.unauthorized {
+            // expected — a 2xx empty body can never decode; treat as expiry
+        } catch {
+            XCTFail("Expected APIError.unauthorized, got \(error)")
+        }
+    }
+
     // MARK: - Helpers
 
     private func setMockResponse(statusCode: Int, json: String) {
