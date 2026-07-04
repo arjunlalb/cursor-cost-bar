@@ -505,6 +505,11 @@ final class MenuBarPopoverViewController: NSViewController {
             $0.removeFromSuperview()
         }
 
+        if viewModel.authState == .loginRequired {
+            applyLoginRequiredStatus()
+            return
+        }
+
         let label = NSTextField(labelWithString: "")
         label.font = NSFont.systemFont(ofSize: 13)
 
@@ -521,6 +526,39 @@ final class MenuBarPopoverViewController: NSViewController {
         }
 
         statusStack.addArrangedSubview(label)
+    }
+
+    /// Expired-session state: explanation + prominent login action instead of
+    /// the bare "Not logged in" label, so the user learns *why* data is gone
+    /// and how to recover without hunting for the small auth row (#76).
+    private func applyLoginRequiredStatus() {
+        statusStack.orientation = .vertical
+        statusStack.alignment   = .centerX
+        statusStack.spacing     = 6
+
+        let title = NSTextField(labelWithString: "⚠️ Session expired")
+        title.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+
+        let body = NSTextField(wrappingLabelWithString: "Log in again to see your Cursor usage.")
+        body.font      = NSFont.systemFont(ofSize: 11)
+        body.textColor = NSColor.secondaryLabelColor
+        body.alignment = .center
+        body.preferredMaxLayoutWidth = 220
+
+        let loginButton = NSButton(
+            title: "Log In",
+            target: self,
+            action: #selector(loginRequiredLoginTapped))
+        loginButton.bezelStyle    = .rounded
+        loginButton.keyEquivalent = "\r"
+
+        statusStack.addArrangedSubview(title)
+        statusStack.addArrangedSubview(body)
+        statusStack.addArrangedSubview(loginButton)
+    }
+
+    @objc private func loginRequiredLoginTapped() {
+        onLogin()
     }
 
     // MARK: - Interval popup
