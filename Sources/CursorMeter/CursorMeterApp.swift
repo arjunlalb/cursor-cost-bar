@@ -80,7 +80,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// `JumpEffectCoordinator` to restore the slot after an emoji swap.
     private func currentRingImage() -> NSImage {
         guard let data = viewModel.usageData else {
-            return CircularProgressIcon.idleImage()
+            return viewModel.authState == .loginRequired
+                ? CircularProgressIcon.loginRequiredImage()
+                : CircularProgressIcon.idleImage()
         }
         let mode = data.isPercentOnly ? 2 : viewModel.menuBarDisplayMode
         switch mode {
@@ -235,6 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         withObservationTracking {
             _ = viewModel.usageData
             _ = viewModel.menuBarDisplayMode
+            _ = viewModel.authState
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
