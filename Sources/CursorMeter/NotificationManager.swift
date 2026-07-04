@@ -173,7 +173,11 @@ final class NotificationManager {
         }
     }
 
-    private func sendNotification(title: String, body: String) async {
+    private func sendNotification(
+        title: String,
+        body: String,
+        identifier: String = UUID().uuidString
+    ) async {
         let center = UNUserNotificationCenter.current()
         do {
             let granted = try await center.requestAuthorization(options: [.alert, .sound])
@@ -185,7 +189,7 @@ final class NotificationManager {
             content.sound = .default
 
             let request = UNNotificationRequest(
-                identifier: UUID().uuidString,
+                identifier: identifier,
                 content: content,
                 trigger: nil
             )
@@ -194,5 +198,21 @@ final class NotificationManager {
         } catch {
             Log.error("Notification failed: \(error)")
         }
+    }
+
+    // MARK: - Session Expiry Notification (#76)
+
+    /// Fixed identifier (not UUID-suffixed) so a re-fire replaces any previous
+    /// banner instead of stacking duplicates in Notification Center.
+    nonisolated static let sessionExpiredIdentifier = "session-expired"
+    nonisolated static let sessionExpiredTitle = "Cursor session expired"
+    nonisolated static let sessionExpiredBody = "Log in again to keep monitoring your Cursor usage."
+
+    func notifySessionExpired() async {
+        await sendNotification(
+            title: Self.sessionExpiredTitle,
+            body: Self.sessionExpiredBody,
+            identifier: Self.sessionExpiredIdentifier
+        )
     }
 }

@@ -148,10 +148,20 @@ final class UsageViewModel {
     // MARK: - Private
 
     private var isRefreshing = false
-    private let apiClient = CursorAPIClient()
+    private let apiClient: CursorAPIClient
     private var refreshTask: Task<Void, Never>?
     private var cachedCookieHeader: String?
     private let notificationManager = NotificationManager()
+
+    /// Keychain deletion, injectable for tests — the default deletes the real
+    /// `com.cursormeter.session` item, which tests must never touch.
+    @ObservationIgnored internal var keychainDeleteHandler: () throws -> Void =
+        KeychainStore.deleteCookieHeader
+
+    /// Expiry-notification hook, injectable for tests. nil → real
+    /// NotificationManager path (UNUserNotificationCenter crashes in the SPM
+    /// test host, so tests always override this).
+    @ObservationIgnored internal var sessionExpiredNotifier: (@MainActor () async -> Void)?
 
     // Previous canonical values for delta tracking. Reset to nil when display mode changes
     // (e.g. plan migration) so we don't compare across incompatible units.
@@ -187,7 +197,8 @@ final class UsageViewModel {
 
     // MARK: - Init
 
-    init() {
+    init(apiClient: CursorAPIClient = CursorAPIClient()) {
+        self.apiClient = apiClient
         loadSettings()
         Task { lastUpdateCheckResult = await UpdateChecker.shared.check() }
     }
@@ -256,9 +267,14 @@ final class UsageViewModel {
         errorMessage = nil
 
         do {
-            async let summaryResult = apiClient.fetchUsageSummary(cookieHeader: cookieHeader)
-            async let usageResult = apiClient.fetchUsage(cookieHeader: cookieHeader)
-            async let userInfoResult = apiClient.fetchUserInfo(cookieHeader: cookieHeader)
+            let apiClient = self.apiClient
+            // `async let` (not unstructured `Task {}`) keeps the three calls
+            // tied to refresh()'s cancellation lifecycle; `capture` turns each
+            // outcome into a Result so the expiry check below can inspect ALL
+            // failures before any single error aborts the refresh.
+            async let summaryCapture = Self.capture { try await apiClient.fetchUsageSummary(cookieHeader: cookieHeader) }
+            async let usageCapture = Self.capture { try await apiClient.fetchUsage(cookieHeader: cookieHeader) }
+            async let userInfoCapture = Self.capture { try await apiClient.fetchUserInfo(cookieHeader: cookieHeader) }
 
             // Optimistic weekly fetch — runs in parallel with the primary batch
             // once we have a cached teamId + email from a prior refresh. Saves
@@ -273,10 +289,20 @@ final class UsageViewModel {
             let optimisticHardLimit: Task<HardLimitResponse?, Never>? =
                 makeOptimisticHardLimitTask(cookieHeader: cookieHeader)
 
-            let userInfo = try await userInfoResult
+            let userInfoRes = await userInfoCapture
+            let summaryRes = await summaryCapture
+            let usageRes = await usageCapture
 
-            let summary = try? await summaryResult
-            let usage = try? await usageResult
+            // Expiry check runs over ALL results before any decode failure can
+            // abort the refresh — the 2026-07-03 incident: /api/auth/me decode
+            // error masked usage-summary's 401 and the logout path never fired.
+            if Self.hasUnauthorized([userInfoRes.failure, summaryRes.failure, usageRes.failure]) {
+                throw APIError.unauthorized
+            }
+
+            let userInfo = try userInfoRes.get()
+            let summary = try? summaryRes.get()
+            let usage = try? usageRes.get()
 
             // Resolve per-seat limits for token-based enterprise plans (no `plan`
             // object). The monthly limit feeds the credit-style $used/$limit
@@ -386,15 +412,25 @@ final class UsageViewModel {
             }
         } catch APIError.unauthorized {
             Log.info("Session expired, clearing keychain")
+            let wasLoggedIn = (authState == .loggedIn)
             cachedCookieHeader = nil
             do {
-                try KeychainStore.deleteCookieHeader()
+                try keychainDeleteHandler()
             } catch {
                 Log.error("Keychain delete failed: \(error.localizedDescription)")
             }
             authState = .loginRequired
             usageData = nil
             stopAutoRefresh()
+            // Notify only on the loggedIn → loginRequired transition so a
+            // manual refresh in the expired state can't re-fire the banner.
+            if wasLoggedIn {
+                if let sessionExpiredNotifier {
+                    await sessionExpiredNotifier()
+                } else {
+                    await notificationManager.notifySessionExpired()
+                }
+            }
         } catch APIError.forbidden {
             errorMessage = "Access denied (subscription may be inactive)"
             Log.error("API returned 403 Forbidden")
@@ -783,6 +819,16 @@ final class UsageViewModel {
         }
     }
 
+    /// Runs `body` and captures its outcome as a Result. Used with `async let`
+    /// so the three primary refresh calls stay structured — cancelled together
+    /// with refresh() — while still letting the caller inspect every failure
+    /// instead of aborting on the first thrown error (#76).
+    nonisolated private static func capture<T: Sendable>(
+        _ body: @Sendable () async throws -> T
+    ) async -> Result<T, Error> {
+        do { return .success(try await body()) } catch { return .failure(error) }
+    }
+
     /// Maps an error to a user-facing message for the fallback (non-network-down, non-auth) error path.
     /// Avoid surfacing raw `localizedDescription` to UI: it can leak request URLs or other diagnostic
     /// detail picked up by crash reporters that auto-capture user-visible state.
@@ -923,6 +969,12 @@ final class UsageViewModel {
         notificationManager.testHook_seed(set)
     }
 
+    /// Test-only — seeds the in-memory cookie so refresh() proceeds past the
+    /// auth guard without touching the Keychain.
+    internal func testHook_setCookieHeader(_ header: String) {
+        cachedCookieHeader = header
+    }
+
     /// Builds a `JumpEvent` from raw delta/limit. Pure function — exposed for testing.
     /// Classification is the OR of percent-of-limit (5/15%) and per-mode absolute
     /// thresholds; `limit ≤ 0` falls back to absolute-only.
@@ -1023,5 +1075,12 @@ final class UsageViewModel {
     private func stopAutoRefresh() {
         refreshTask?.cancel()
         refreshTask = nil
+    }
+}
+
+private extension Result {
+    var failure: Failure? {
+        if case .failure(let error) = self { return error }
+        return nil
     }
 }
