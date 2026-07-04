@@ -86,6 +86,12 @@ final class UsageViewModelTests: XCTestCase {
         XCTAssertFalse(UsageViewModel.shouldRecheckUpdate(lastCheck: recent, now: now))
     }
 
+    func testShouldRecheckUpdateWhenClockRolledBack() {
+        let now = Date(timeIntervalSince1970: 200_000)
+        let future = now.addingTimeInterval(3_600)
+        XCTAssertTrue(UsageViewModel.shouldRecheckUpdate(lastCheck: future, now: now))
+    }
+
     // MARK: - On-demand latch
 
     @MainActor

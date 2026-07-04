@@ -842,27 +842,29 @@ final class UsageViewModel {
         }
     }
 
-    /// True when any captured refresh failure is `.unauthorized`. Session
-    /// expiry may surface on ANY of the three endpoints (all unofficial, all
-    /// respond differently to an invalid cookie), so the 401 check must run
-    /// over every result before a decode error from one endpoint can abort
-    /// the refresh (#76).
     /// Update re-check cadence for long-running instances. Menu bar apps run
     /// for weeks without a relaunch, so the launch-time check alone never
     /// sees new releases (#80).
     nonisolated static let updateRecheckInterval: TimeInterval = 86_400
 
     /// Pure gate for the periodic update re-check: true when no check has
-    /// happened yet or the last one is older than `interval`.
+    /// happened yet, the last one is older than `interval`, or the clock has
+    /// gone backwards (a rolled-back wall clock would otherwise suppress
+    /// checks until it catches up past the stale timestamp).
     nonisolated static func shouldRecheckUpdate(
         lastCheck: Date?,
         now: Date,
         interval: TimeInterval = updateRecheckInterval
     ) -> Bool {
         guard let lastCheck else { return true }
-        return now.timeIntervalSince(lastCheck) > interval
+        return now.timeIntervalSince(lastCheck) > interval || now < lastCheck
     }
 
+    /// True when any captured refresh failure is `.unauthorized`. Session
+    /// expiry may surface on ANY of the three endpoints (all unofficial, all
+    /// respond differently to an invalid cookie), so the 401 check must run
+    /// over every result before a decode error from one endpoint can abort
+    /// the refresh (#76).
     nonisolated static func hasUnauthorized(_ errors: [Error?]) -> Bool {
         errors.contains { error in
             guard let apiError = error as? APIError else { return false }
