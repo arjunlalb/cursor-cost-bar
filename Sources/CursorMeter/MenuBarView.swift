@@ -505,6 +505,11 @@ final class MenuBarPopoverViewController: NSViewController {
             $0.removeFromSuperview()
         }
 
+        // applyLoginRequiredStatus() overrides these and the stack persists
+        // across state changes — restore the configured defaults each pass.
+        statusStack.alignment = .leading
+        statusStack.spacing   = 2
+
         if viewModel.authState == .loginRequired {
             applyLoginRequiredStatus()
             return
