@@ -127,6 +127,9 @@ final class UsageViewModel {
         return nil
     }
     var isCheckingUpdate = false
+    /// Wall-clock time of the most recent update check (launch, manual, or
+    /// periodic). Gates the periodic re-check for long-running instances (#80).
+    @ObservationIgnored private var lastUpdateCheckAt: Date?
 
     // MARK: - Settings
 
@@ -213,6 +216,7 @@ final class UsageViewModel {
     init(apiClient: CursorAPIClient = CursorAPIClient()) {
         self.apiClient = apiClient
         loadSettings()
+        lastUpdateCheckAt = Date()
         Task { lastUpdateCheckResult = await UpdateChecker.shared.check() }
     }
 
@@ -387,6 +391,14 @@ final class UsageViewModel {
             consecutiveFailureCount = 0
             networkRetryTask?.cancel()
             networkRetryTask = nil
+
+            // Periodic update re-check rides the refresh cycle (success path
+            // only, so an offline stretch can't hammer GitHub) instead of
+            // owning a timer — at most one API call per updateRecheckInterval.
+            if Self.shouldRecheckUpdate(lastCheck: lastUpdateCheckAt, now: Date()) {
+                lastUpdateCheckAt = Date()
+                Task { lastUpdateCheckResult = await UpdateChecker.shared.check() }
+            }
 
             // Compute jump delta against previous canonical value (skip on first refresh,
             // mode change, or non-positive delta).
@@ -766,6 +778,7 @@ final class UsageViewModel {
 
     func checkForUpdate() async {
         isCheckingUpdate = true
+        lastUpdateCheckAt = Date()
         async let result = UpdateChecker.shared.check()
         let start = ContinuousClock.now
         lastUpdateCheckResult = await result
@@ -827,6 +840,24 @@ final class UsageViewModel {
         {
             weeklyChartStyle = style
         }
+    }
+
+    /// Update re-check cadence for long-running instances. Menu bar apps run
+    /// for weeks without a relaunch, so the launch-time check alone never
+    /// sees new releases (#80).
+    nonisolated static let updateRecheckInterval: TimeInterval = 86_400
+
+    /// Pure gate for the periodic update re-check: true when no check has
+    /// happened yet, the last one is older than `interval`, or the clock has
+    /// gone backwards (a rolled-back wall clock would otherwise suppress
+    /// checks until it catches up past the stale timestamp).
+    nonisolated static func shouldRecheckUpdate(
+        lastCheck: Date?,
+        now: Date,
+        interval: TimeInterval = updateRecheckInterval
+    ) -> Bool {
+        guard let lastCheck else { return true }
+        return now.timeIntervalSince(lastCheck) > interval || now < lastCheck
     }
 
     /// True when any captured refresh failure is `.unauthorized`. Session
