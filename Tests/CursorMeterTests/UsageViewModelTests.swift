@@ -48,6 +48,22 @@ final class UsageViewModelTests: XCTestCase {
         XCTAssertFalse(message.contains("api/usage"))
     }
 
+    // MARK: - hasUnauthorized (#76)
+
+    func testHasUnauthorizedTrueWhenAnyErrorIsUnauthorized() {
+        let decodeError = DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "bad"))
+        XCTAssertTrue(UsageViewModel.hasUnauthorized([decodeError, APIError.unauthorized, nil]))
+    }
+
+    func testHasUnauthorizedFalseForOtherFailures() {
+        let decodeError = DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "bad"))
+        XCTAssertFalse(UsageViewModel.hasUnauthorized([decodeError, APIError.forbidden, nil]))
+    }
+
+    func testHasUnauthorizedFalseWhenAllNil() {
+        XCTAssertFalse(UsageViewModel.hasUnauthorized([nil, nil, nil]))
+    }
+
     // MARK: - On-demand latch
 
     @MainActor

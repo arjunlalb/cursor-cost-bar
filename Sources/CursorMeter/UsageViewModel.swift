@@ -770,6 +770,19 @@ final class UsageViewModel {
         }
     }
 
+    /// True when any captured refresh failure is `.unauthorized`. Session
+    /// expiry may surface on ANY of the three endpoints (all unofficial, all
+    /// respond differently to an invalid cookie), so the 401 check must run
+    /// over every result before a decode error from one endpoint can abort
+    /// the refresh (#76).
+    nonisolated static func hasUnauthorized(_ errors: [Error?]) -> Bool {
+        errors.contains { error in
+            guard let apiError = error as? APIError else { return false }
+            if case .unauthorized = apiError { return true }
+            return false
+        }
+    }
+
     /// Maps an error to a user-facing message for the fallback (non-network-down, non-auth) error path.
     /// Avoid surfacing raw `localizedDescription` to UI: it can leak request URLs or other diagnostic
     /// detail picked up by crash reporters that auto-capture user-visible state.
