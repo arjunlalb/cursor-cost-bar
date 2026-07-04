@@ -10,8 +10,9 @@ import XCTest
 @MainActor
 final class SessionExpiryTests: XCTestCase {
 
-    @MainActor final class NotifySpy {
-        var count = 0
+    @MainActor final class ExpirySpy {
+        var notifyCount = 0
+        var keychainDeleteCount = 0
     }
 
     override func tearDown() {
@@ -21,12 +22,12 @@ final class SessionExpiryTests: XCTestCase {
 
     /// View model wired to MockURLProtocol with all real side effects
     /// (Keychain, UNUserNotificationCenter) stubbed out.
-    private func makeViewModel(spy: NotifySpy) -> UsageViewModel {
+    private func makeViewModel(spy: ExpirySpy) -> UsageViewModel {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockURLProtocol.self]
         let vm = UsageViewModel(apiClient: CursorAPIClient(configuration: config))
-        vm.keychainDeleteHandler = {}          // never touch the real Keychain
-        vm.sessionExpiredNotifier = { spy.count += 1 }  // UNUserNotificationCenter crashes in SPM tests
+        vm.keychainDeleteHandler = { spy.keychainDeleteCount += 1 }
+        vm.sessionExpiredNotifier = { spy.notifyCount += 1 }  // UNUserNotificationCenter crashes in SPM tests
         vm.testHook_setCookieHeader("WorkosCursorSessionToken=test")
         vm.authState = .loggedIn
         return vm
@@ -37,7 +38,7 @@ final class SessionExpiryTests: XCTestCase {
     /// undecodable body to keep proving the deeper invariant on its own: a
     /// decode failure on one endpoint must NEVER mask another endpoint's 401.
     func test_refresh_userInfoDecodeFailure_summary401_firesLogoutPath() async {
-        let spy = NotifySpy()
+        let spy = ExpirySpy()
         let vm = makeViewModel(spy: spy)
         MockURLProtocol.requestHandler = { request in
             let url = request.url!
@@ -53,14 +54,15 @@ final class SessionExpiryTests: XCTestCase {
 
         XCTAssertEqual(vm.authState, .loginRequired)
         XCTAssertNil(vm.usageData)
-        XCTAssertEqual(spy.count, 1, "expiry notification fires exactly once on the transition")
+        XCTAssertEqual(spy.notifyCount, 1, "expiry notification fires exactly once on the transition")
+        XCTAssertEqual(spy.keychainDeleteCount, 1)
     }
 
     /// /api/auth/me 204 empty body ALONE (Task 1 behavior) must reach the
     /// logout path — the other endpoints fail with 500 here so the 204 is
     /// the only expiry signal in play.
     func test_refresh_authMe204_firesLogoutPath() async {
-        let spy = NotifySpy()
+        let spy = ExpirySpy()
         let vm = makeViewModel(spy: spy)
         MockURLProtocol.requestHandler = { request in
             let url = request.url!
@@ -75,13 +77,14 @@ final class SessionExpiryTests: XCTestCase {
         await vm.refresh()
 
         XCTAssertEqual(vm.authState, .loginRequired)
-        XCTAssertEqual(spy.count, 1)
+        XCTAssertEqual(spy.notifyCount, 1)
+        XCTAssertEqual(spy.keychainDeleteCount, 1)
     }
 
     /// userInfo decodes FINE but summary/usage return 401 — the logout path
     /// must not depend on /api/auth/me being the endpoint that fails.
     func test_refresh_userInfoOK_summary401_firesLogoutPath() async {
-        let spy = NotifySpy()
+        let spy = ExpirySpy()
         let vm = makeViewModel(spy: spy)
         MockURLProtocol.requestHandler = { request in
             let url = request.url!
@@ -96,13 +99,14 @@ final class SessionExpiryTests: XCTestCase {
         await vm.refresh()
 
         XCTAssertEqual(vm.authState, .loginRequired)
-        XCTAssertEqual(spy.count, 1)
+        XCTAssertEqual(spy.notifyCount, 1)
+        XCTAssertEqual(spy.keychainDeleteCount, 1)
     }
 
     /// A second refresh in the expired state must not re-notify — the cookie
     /// is already cleared, so refresh() early-returns before any API call.
     func test_refresh_repeatedInExpiredState_doesNotRenotify() async {
-        let spy = NotifySpy()
+        let spy = ExpirySpy()
         let vm = makeViewModel(spy: spy)
         MockURLProtocol.requestHandler = { request in
             let unauthorized = HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!
@@ -113,12 +117,13 @@ final class SessionExpiryTests: XCTestCase {
         await vm.refresh()
 
         XCTAssertEqual(vm.authState, .loginRequired)
-        XCTAssertEqual(spy.count, 1, "only the loggedIn → loginRequired transition notifies")
+        XCTAssertEqual(spy.notifyCount, 1, "only the loggedIn → loginRequired transition notifies")
+        XCTAssertEqual(spy.keychainDeleteCount, 1, "second refresh early-returns before any API call")
     }
 
     /// Non-401 failures (e.g. server error) must NOT trigger the logout path.
     func test_refresh_serverError_keepsSession() async {
-        let spy = NotifySpy()
+        let spy = ExpirySpy()
         let vm = makeViewModel(spy: spy)
         MockURLProtocol.requestHandler = { request in
             let serverError = HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!
@@ -128,6 +133,7 @@ final class SessionExpiryTests: XCTestCase {
         await vm.refresh()
 
         XCTAssertEqual(vm.authState, .loggedIn)
-        XCTAssertEqual(spy.count, 0)
+        XCTAssertEqual(spy.notifyCount, 0)
+        XCTAssertEqual(spy.keychainDeleteCount, 0)
     }
 }
