@@ -102,6 +102,19 @@ final class UsageViewModel {
     var usageData: UsageDisplayData?
     var errorMessage: String?
     var isLoading = false
+    /// Consecutive failed refreshes (any failure except the unauthorized →
+    /// logout path). Drives the stale-data indicator (#77).
+    private(set) var consecutiveFailureCount = 0
+    /// Wall-clock time of the last successful refresh — the stale line's
+    /// "Last updated" timestamp.
+    private(set) var lastSuccessAt: Date?
+    /// Failures before cached data is flagged stale (5 × default 2-min
+    /// interval ≈ 10 min without an update).
+    nonisolated static let staleThreshold = 5
+
+    var isDataStale: Bool {
+        usageData != nil && consecutiveFailureCount >= Self.staleThreshold
+    }
     /// Outcome of the most recent update check (nil = never checked this session).
     /// Settings UI consults this to distinguish "up to date" from "check failed";
     /// the popover only cares about `availableUpdate` (computed below).
@@ -370,6 +383,8 @@ final class UsageViewModel {
                 usageData = base.withOnDemandActive(isOnDemandLatched)
             }
             Log.info("Usage data refreshed")
+            lastSuccessAt = Date()
+            consecutiveFailureCount = 0
             networkRetryTask?.cancel()
             networkRetryTask = nil
 
@@ -421,6 +436,9 @@ final class UsageViewModel {
             }
             authState = .loginRequired
             usageData = nil
+            // Expired session has its own dedicated UI; stale must not leak
+            // into the next login.
+            consecutiveFailureCount = 0
             // stopAutoRefresh() cancels the auto-refresh task this code may be
             // running inside — notify FIRST so the notification awaits don't run
             // in a cancelled task. Re-entrance meanwhile is blocked by isRefreshing.
@@ -436,8 +454,10 @@ final class UsageViewModel {
             stopAutoRefresh()
         } catch APIError.forbidden {
             errorMessage = "Access denied (subscription may be inactive)"
+            consecutiveFailureCount += 1
             Log.error("API returned 403 Forbidden")
         } catch {
+            consecutiveFailureCount += 1
             if usageData == nil {
                 // URLSession failures are wrapped as `APIError.networkError(URLError)`
                 // by the API client, so direct cast misses offline cases. Unwrap both

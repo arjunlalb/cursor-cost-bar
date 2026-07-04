@@ -291,6 +291,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             _ = viewModel.isEnterpriseTeam
             _ = viewModel.weeklyChartEnabled
             _ = viewModel.weeklyChartStyle
+            _ = viewModel.consecutiveFailureCount
+            _ = viewModel.lastSuccessAt
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
