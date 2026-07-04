@@ -421,7 +421,9 @@ final class UsageViewModel {
             }
             authState = .loginRequired
             usageData = nil
-            stopAutoRefresh()
+            // stopAutoRefresh() cancels the auto-refresh task this code may be
+            // running inside — notify FIRST so the notification awaits don't run
+            // in a cancelled task. Re-entrance meanwhile is blocked by isRefreshing.
             // Notify only on the loggedIn → loginRequired transition so a
             // manual refresh in the expired state can't re-fire the banner.
             if wasLoggedIn {
@@ -431,6 +433,7 @@ final class UsageViewModel {
                     await notificationManager.notifySessionExpired()
                 }
             }
+            stopAutoRefresh()
         } catch APIError.forbidden {
             errorMessage = "Access denied (subscription may be inactive)"
             Log.error("API returned 403 Forbidden")

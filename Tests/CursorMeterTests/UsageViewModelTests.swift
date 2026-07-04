@@ -64,6 +64,10 @@ final class UsageViewModelTests: XCTestCase {
         XCTAssertFalse(UsageViewModel.hasUnauthorized([nil, nil, nil]))
     }
 
+    func testHasUnauthorizedTrueWithMixedNonAPIErrors() {
+        XCTAssertTrue(UsageViewModel.hasUnauthorized([URLError(.timedOut), APIError.unauthorized]))
+    }
+
     // MARK: - On-demand latch
 
     @MainActor
