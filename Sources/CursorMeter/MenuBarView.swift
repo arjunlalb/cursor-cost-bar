@@ -65,7 +65,9 @@ final class MenuBarPopoverViewController: NSViewController {
 
     // Stale-data indicator (hidden unless viewModel.isDataStale) (#77)
     private let staleLabel       = NSTextField(labelWithString: "")
-    private static let staleTimeFormatter: DateFormatter = {
+    // Explicit MainActor isolation: DateFormatter is mutable/non-Sendable and
+    // CI's stricter Sendable checking may not infer isolation for statics.
+    @MainActor private static let staleTimeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.timeStyle = .short
         f.dateStyle = .none
