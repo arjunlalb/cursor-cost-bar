@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Notifications — dual-thumb range slider mockup</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 32px; background: #f2f2f4; color: #1d1d1f; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #6e6e73; font-size: 13px; margin-bottom: 24px; }
+  .row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+  .variant h3 { font-size: 14px; margin: 0 0 2px; }
+  .variant .tag { font-size: 11px; color: #6e6e73; margin-bottom: 10px; }
+
+  /* settings panel simulation (dark) */
+  .panel {
+    width: 340px; background: #2d2f31; border-radius: 10px; padding: 16px 18px;
+    color: #e8e8ea; font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  }
+  .section { font-size: 11px; font-weight: 700; letter-spacing: .06em; color: #9a9aa0; margin-bottom: 10px; }
+  .check { margin-bottom: 14px; }
+  .check input { accent-color: #2f6fed; }
+
+  .slabel { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  .slabel b { font-variant-numeric: tabular-nums; }
+  .track-old { height: 4px; background: #55575a; border-radius: 2px; position: relative; margin: 10px 2px 22px; }
+  .thumb-old { width: 12px; height: 22px; border-radius: 6px; background: #b8b8bd; position: absolute; top: -9px; }
+
+  /* dual-thumb range */
+  .range { position: relative; height: 34px; margin: 26px 2px 6px; }
+  .range .track { position: absolute; top: 15px; left: 0; right: 0; height: 5px; border-radius: 3px; background: #3f4144; overflow: hidden; }
+  .range .zone { position: absolute; top: 0; height: 100%; }
+  .range .z-ok   { left: 0; background: #33b34055; }
+  .range .z-warn { background: #f2a60066; }
+  .range .z-crit { background: #e0342c66; right: 0; }
+  .thumb {
+    position: absolute; top: 6px; width: 14px; height: 24px; border-radius: 7px;
+    transform: translateX(-50%); box-shadow: 0 1px 3px rgba(0,0,0,.5);
+  }
+  .thumb.warn { background: #f2a600; }
+  .thumb.crit { background: #e0453c; }
+  .bubble {
+    position: absolute; top: -20px; transform: translateX(-50%);
+    font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums;
+    padding: 1px 5px; border-radius: 4px; color: #1d1d1f; white-space: nowrap;
+  }
+  .bubble.warn { background: #f2a600; }
+  .bubble.crit { background: #e0453c; color: #fff; }
+  .ticks { display: flex; justify-content: space-between; font-size: 9px; color: #77787d; margin: 2px 2px 0; }
+  .legend { display: flex; gap: 12px; font-size: 10px; color: #9a9aa0; margin-top: 8px; }
+  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
+
+  .note { font-size: 12px; color: #6e6e73; margin-top: 22px; max-width: 780px; line-height: 1.6; }
+</style>
+</head>
+<body>
+
+<h1>Notifications — 슬라이더 2개 → 트랙 1개 + 썸 2개</h1>
+<div class="sub">Settings → Notifications 섹션. Warning/Critical이 같은 0–100% 축의 두 지점임을 구조로 드러냄</div>
+
+<div class="row">
+
+  <div class="variant">
+    <h3>Before (현재)</h3>
+    <div class="tag">독립 슬라이더 2개 — 관계 안 보임, 세로 92pt</div>
+    <div class="panel">
+      <div class="section">NOTIFICATIONS</div>
+      <div class="check"><label><input type="checkbox" checked> Enable usage alerts</label></div>
+      <div class="slabel"><span>Warning</span><b>60%</b></div>
+      <div class="track-old"><div class="thumb-old" style="left: 58%"></div></div>
+      <div class="slabel"><span>Critical</span><b>90%</b></div>
+      <div class="track-old"><div class="thumb-old" style="left: 88%"></div></div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <h3>After (제안)</h3>
+    <div class="tag">범위 슬라이더 1개 + 구간 색 + 값 버블 — 세로 ~58pt</div>
+    <div class="panel">
+      <div class="section">NOTIFICATIONS</div>
+      <div class="check"><label><input type="checkbox" checked> Enable usage alerts</label></div>
+      <div class="range">
+        <div class="track">
+          <div class="zone z-ok" style="width: 60%"></div>
+          <div class="zone z-warn" style="left: 60%; width: 30%"></div>
+          <div class="zone z-crit" style="left: 90%"></div>
+        </div>
+        <div class="bubble warn" style="left: 60%">W 60%</div>
+        <div class="thumb warn" style="left: 60%"></div>
+        <div class="bubble crit" style="left: 90%">C 90%</div>
+        <div class="thumb crit" style="left: 90%"></div>
+      </div>
+      <div class="ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+      <div class="legend">
+        <span><i style="background:#33b340"></i>정상</span>
+        <span><i style="background:#f2a600"></i>Warning 알림</span>
+        <span><i style="background:#e0453c"></i>Critical 알림</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <h3>After — 근접 상태</h3>
+    <div class="tag">두 값이 가까울 때: 버블이 위/아래로 비켜남 + 최소 간격 5%</div>
+    <div class="panel">
+      <div class="section">NOTIFICATIONS</div>
+      <div class="check"><label><input type="checkbox" checked> Enable usage alerts</label></div>
+      <div class="range">
+        <div class="track">
+          <div class="zone z-ok" style="width: 80%"></div>
+          <div class="zone z-warn" style="left: 80%; width: 5%"></div>
+          <div class="zone z-crit" style="left: 85%"></div>
+        </div>
+        <div class="bubble warn" style="left: 80%; top: -20px">W 80%</div>
+        <div class="thumb warn" style="left: 80%"></div>
+        <div class="bubble crit" style="left: 85%; top: 32px">C 85%</div>
+        <div class="thumb crit" style="left: 85%"></div>
+      </div>
+      <div class="ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+      <div class="legend">
+        <span><i style="background:#33b340"></i>정상</span>
+        <span><i style="background:#f2a600"></i>Warning</span>
+        <span><i style="background:#e0453c"></i>Critical</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<p class="note">
+<b>동작 규칙(제안)</b> — 썸 드래그 시 5% 스텝 스냅(기존 슬라이더와 동일 정밀도), Warning은 Critical−5%를 넘지 못하고 그 반대도 같음(교차 불가), 구간 색은 팝오버/메뉴바와 같은 토큰(<code>accentColor/warnColor/critColor</code>) 재사용으로 앱 전체 색 의미 일관 유지.
+<br><br>
+<b>구현 코스트 정직 고지</b> — AppKit <code>NSSlider</code>는 썸 2개를 지원하지 않아 커스텀 NSView(마우스 트래킹 + 드로잉 + 접근성)를 새로 만들어야 합니다. 기존 슬라이더 2개 재사용 대비 구현·테스트 부담이 확실히 큽니다(대략 반나절~하루). 접근성(VoiceOver로 각 썸 조작)도 커스텀 구현 몫입니다.
+</p>
+
+</body>
+</html>
