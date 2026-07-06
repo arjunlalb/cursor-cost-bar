@@ -20,6 +20,8 @@ private enum SettingsKey: String {
     case jumpGlyphStyle
     case weeklyChartEnabled
     case weeklyChartStyle
+    case appStatusNotificationEnabled
+    case lastNotifiedUpdateVersion
     // Legacy keys consulted only by `loadSettings` migration block.
     case legacyShowMenuBarText = "showMenuBarText"
     case legacyShowMenuBarPercent = "showMenuBarPercent"
@@ -115,6 +117,17 @@ final class UsageViewModel {
     var isDataStale: Bool {
         usageData != nil && consecutiveFailureCount >= Self.staleThreshold
     }
+
+    /// Release notification eligibility (#83). Pure so dedup logic is unit-testable.
+    nonisolated static func shouldNotifyUpdate(version: String, lastNotified: String?, enabled: Bool) -> Bool {
+        enabled && version != lastNotified
+    }
+
+    /// Error notification fires exactly on the transition to stale (== not >=),
+    /// so failures 6, 7, … don't re-fire; a success resets the counter and re-arms.
+    nonisolated static func shouldNotifyRefreshFailing(failureCount: Int, enabled: Bool) -> Bool {
+        enabled && failureCount == staleThreshold
+    }
     /// Outcome of the most recent update check (nil = never checked this session).
     /// Settings UI consults this to distinguish "up to date" from "check failed";
     /// the popover only cares about `availableUpdate` (computed below).
@@ -139,6 +152,9 @@ final class UsageViewModel {
     var criticalThreshold: Int = 90
     /// 0 = none, 1 = fraction (e.g. 120/500), 2 = percent (e.g. 24%)
     var menuBarDisplayMode: Int = 0
+    /// Unified toggle for app-status notifications (#83): new-release and
+    /// refresh-failing. Independent of usage-threshold and jump settings.
+    var appStatusNotificationEnabled: Bool = true
 
     // MARK: - Jump Effect
 
@@ -751,6 +767,11 @@ final class UsageViewModel {
         UserDefaults.standard.set(mode, for: .menuBarDisplayMode)
     }
 
+    func setAppStatusNotificationEnabled(_ enabled: Bool) {
+        appStatusNotificationEnabled = enabled
+        UserDefaults.standard.set(enabled, for: .appStatusNotificationEnabled)
+    }
+
     func setJumpEffectEnabled(_ enabled: Bool) {
         jumpEffectEnabled = enabled
         UserDefaults.standard.set(enabled, for: .jumpEffectEnabled)
@@ -818,6 +839,9 @@ final class UsageViewModel {
             } else if hadText {
                 menuBarDisplayMode = 1
             }
+        }
+        if let val = defaults.object(for: .appStatusNotificationEnabled) as? Bool {
+            appStatusNotificationEnabled = val
         }
         if let val = defaults.object(for: .jumpEffectEnabled) as? Bool {
             jumpEffectEnabled = val
