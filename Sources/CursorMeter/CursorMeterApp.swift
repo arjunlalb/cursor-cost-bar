@@ -268,7 +268,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let identifier = response.notification.request.identifier
-        if NotificationManager.opensLoginWindow(forNotificationIdentifier: identifier) {
+        if NotificationManager.clickAction(
+            forNotificationIdentifier: identifier,
+            userInfo: response.notification.request.content.userInfo
+        ) == .openLoginWindow {
             Task { @MainActor [weak self] in
                 NSApp.activate(ignoringOtherApps: true)
                 self?.showLogin()

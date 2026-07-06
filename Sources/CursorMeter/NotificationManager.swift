@@ -41,6 +41,16 @@ extension NotificationMode {
     }
 }
 
+// MARK: - Notification Click Action
+
+/// What the app should do when the user clicks a delivered notification.
+enum NotificationClickAction: Sendable, Equatable {
+    case openLoginWindow
+    case openReleaseURL(URL)
+    case openPopover
+    case none
+}
+
 // MARK: - Notification Manager
 
 @MainActor
@@ -176,7 +186,8 @@ final class NotificationManager {
     private func sendNotification(
         title: String,
         body: String,
-        identifier: String = UUID().uuidString
+        identifier: String = UUID().uuidString,
+        userInfo: [AnyHashable: Any]? = nil
     ) async {
         let center = UNUserNotificationCenter.current()
         do {
@@ -187,6 +198,9 @@ final class NotificationManager {
             content.title = title
             content.body = body
             content.sound = .default
+            if let userInfo {
+                content.userInfo = userInfo
+            }
 
             let request = UNNotificationRequest(
                 identifier: identifier,
@@ -216,12 +230,58 @@ final class NotificationManager {
         )
     }
 
-    // MARK: - Notification Click Routing (#79)
+    // MARK: - App Status Notifications (#83)
 
-    /// Pure routing decision for a clicked notification. Only the session-expired
-    /// banner should open the login window — threshold/usage-jump notifications
-    /// keep the default (no-op) click behavior.
-    nonisolated static func opensLoginWindow(forNotificationIdentifier id: String) -> Bool {
-        id == sessionExpiredIdentifier
+    /// Fixed identifiers so a re-fire replaces the previous banner instead of
+    /// stacking duplicates in Notification Center.
+    nonisolated static let updateAvailableIdentifier = "update-available"
+    nonisolated static let refreshFailingIdentifier = "refresh-failing"
+    /// userInfo key carrying the GitHub release page URL as a String.
+    nonisolated static let releaseURLUserInfoKey = "releaseURL"
+
+    /// Pure body formatter, unit-tested without UNUserNotificationCenter.
+    nonisolated static func makeUpdateAvailableBody(version: String) -> String {
+        "v\(version) is out — click to see what's new."
+    }
+
+    func notifyUpdateAvailable(version: String, releaseURL: String) async {
+        await sendNotification(
+            title: "CursorMeter update available",
+            body: Self.makeUpdateAvailableBody(version: version),
+            identifier: Self.updateAvailableIdentifier,
+            userInfo: [Self.releaseURLUserInfoKey: releaseURL]
+        )
+    }
+
+    func notifyRefreshFailing() async {
+        await sendNotification(
+            title: "Cursor connection trouble",
+            body: "Usage refresh has failed \(UsageViewModel.staleThreshold) times in a row. Data may be stale.",
+            identifier: Self.refreshFailingIdentifier
+        )
+    }
+
+    // MARK: - Notification Click Routing (#79, #83)
+
+    /// Pure routing decision for a clicked notification, including userInfo
+    /// parsing so malformed payloads are unit-testable. Threshold and
+    /// usage-jump notifications keep the default (no-op) click behavior.
+    nonisolated static func clickAction(
+        forNotificationIdentifier id: String,
+        userInfo: [AnyHashable: Any]
+    ) -> NotificationClickAction {
+        switch id {
+        case sessionExpiredIdentifier:
+            return .openLoginWindow
+        case updateAvailableIdentifier:
+            guard let urlString = userInfo[releaseURLUserInfoKey] as? String,
+                  let url = URL(string: urlString)
+            else { return .none }
+            return .openReleaseURL(url)
+        case refreshFailingIdentifier:
+            return .openPopover
+        default:
+            return .none
+        }
     }
 }

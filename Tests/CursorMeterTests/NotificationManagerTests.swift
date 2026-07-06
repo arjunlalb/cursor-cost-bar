@@ -203,29 +203,78 @@ final class NotificationManagerTests: XCTestCase {
     // identifier-prefix tests above exercise the user-visible contract; the
     // remaining authorization/dispatch path is covered by manual smoke testing.
 
-    // MARK: - Notification Click Routing (#79)
+    // MARK: - Notification Click Routing (#79, #83)
 
-    func testSessionExpiredIdentifierOpensLoginWindow() {
-        XCTAssertTrue(
-            NotificationManager.opensLoginWindow(
-                forNotificationIdentifier: NotificationManager.sessionExpiredIdentifier
-            )
+    func testClickActionSessionExpiredOpensLoginWindow() {
+        XCTAssertEqual(
+            NotificationManager.clickAction(
+                forNotificationIdentifier: NotificationManager.sessionExpiredIdentifier,
+                userInfo: [:]
+            ),
+            .openLoginWindow
         )
     }
 
-    func testUUIDStyleIdentifierDoesNotOpenLoginWindow() {
-        XCTAssertFalse(
-            NotificationManager.opensLoginWindow(
-                forNotificationIdentifier: UUID().uuidString
+    func testClickActionLegacyIdentifiersAreNoOps() {
+        for id in ["\(NotificationManager.usageJumpIdentifierPrefix)-ABC", UUID().uuidString, ""] {
+            XCTAssertEqual(
+                NotificationManager.clickAction(forNotificationIdentifier: id, userInfo: [:]),
+                .none
             )
+        }
+    }
+
+    func testClickActionUpdateAvailableParsesReleaseURL() {
+        let action = NotificationManager.clickAction(
+            forNotificationIdentifier: NotificationManager.updateAvailableIdentifier,
+            userInfo: [NotificationManager.releaseURLUserInfoKey: "https://github.com/WoojinAhn/CursorMeter/releases/tag/v0.8.0"]
+        )
+        XCTAssertEqual(
+            action,
+            .openReleaseURL(URL(string: "https://github.com/WoojinAhn/CursorMeter/releases/tag/v0.8.0")!)
         )
     }
 
-    func testUsageJumpIdentifierDoesNotOpenLoginWindow() {
-        XCTAssertFalse(
-            NotificationManager.opensLoginWindow(
-                forNotificationIdentifier: "\(NotificationManager.usageJumpIdentifierPrefix)-\(UUID().uuidString)"
-            )
+    func testClickActionUpdateAvailableMissingOrMalformedURLIsNoOp() {
+        XCTAssertEqual(
+            NotificationManager.clickAction(
+                forNotificationIdentifier: NotificationManager.updateAvailableIdentifier,
+                userInfo: [:]
+            ),
+            .none
+        )
+        XCTAssertEqual(
+            NotificationManager.clickAction(
+                forNotificationIdentifier: NotificationManager.updateAvailableIdentifier,
+                userInfo: [NotificationManager.releaseURLUserInfoKey: ""]
+            ),
+            .none
+        )
+        XCTAssertEqual(
+            NotificationManager.clickAction(
+                forNotificationIdentifier: NotificationManager.updateAvailableIdentifier,
+                userInfo: [NotificationManager.releaseURLUserInfoKey: 42]
+            ),
+            .none
+        )
+    }
+
+    func testClickActionRefreshFailingOpensPopover() {
+        XCTAssertEqual(
+            NotificationManager.clickAction(
+                forNotificationIdentifier: NotificationManager.refreshFailingIdentifier,
+                userInfo: [:]
+            ),
+            .openPopover
+        )
+    }
+
+    // MARK: - Update-available body (#83)
+
+    func testMakeUpdateAvailableBody() {
+        XCTAssertEqual(
+            NotificationManager.makeUpdateAvailableBody(version: "0.8.0"),
+            "v0.8.0 is out — click to see what's new."
         )
     }
 }
