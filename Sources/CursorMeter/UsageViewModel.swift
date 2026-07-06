@@ -48,6 +48,13 @@ enum RefreshInterval: Int, CaseIterable {
     }
 }
 
+/// Origin of an update-check result. Only automatic checks may notify —
+/// a manual check's result is already on screen in the settings window.
+enum UpdateCheckSource: Sendable, Equatable {
+    case automatic
+    case manual
+}
+
 // MARK: - Jump Effect Types
 
 /// Magnitude of a usage jump between successive refreshes.
@@ -195,6 +202,13 @@ final class UsageViewModel {
     /// test host, so tests always override this).
     @ObservationIgnored internal var sessionExpiredNotifier: (@MainActor () async -> Void)?
 
+    /// App-status notification hooks (#83), injectable for tests. Unlike
+    /// `sessionExpiredNotifier` these have NO real fallback: nil → skip.
+    /// Production wires them in CursorMeterApp; a nil seam must never reach
+    /// UNUserNotificationCenter (SPM test host crash) or queue work.
+    @ObservationIgnored internal var updateAvailableNotifier: (@MainActor (_ version: String, _ releaseURL: String) async -> Void)?
+    @ObservationIgnored internal var refreshFailingNotifier: (@MainActor () async -> Void)?
+
     // Previous canonical values for delta tracking. Reset to nil when display mode changes
     // (e.g. plan migration) so we don't compare across incompatible units.
     private var previousPlanUsedCents: Int?
@@ -233,7 +247,10 @@ final class UsageViewModel {
         self.apiClient = apiClient
         loadSettings()
         lastUpdateCheckAt = Date()
-        Task { lastUpdateCheckResult = await UpdateChecker.shared.check() }
+        Task {
+            let result = await UpdateChecker.shared.check()
+            await recordUpdateCheckResult(result, source: .automatic)
+        }
     }
 
     // MARK: - Session
@@ -413,7 +430,10 @@ final class UsageViewModel {
             // owning a timer — at most one API call per updateRecheckInterval.
             if Self.shouldRecheckUpdate(lastCheck: lastUpdateCheckAt, now: Date()) {
                 lastUpdateCheckAt = Date()
-                Task { lastUpdateCheckResult = await UpdateChecker.shared.check() }
+                Task {
+                    let result = await UpdateChecker.shared.check()
+                    await recordUpdateCheckResult(result, source: .automatic)
+                }
             }
 
             // Compute jump delta against previous canonical value (skip on first refresh,
@@ -483,9 +503,11 @@ final class UsageViewModel {
         } catch APIError.forbidden {
             errorMessage = "Access denied (subscription may be inactive)"
             consecutiveFailureCount += 1
+            await maybeNotifyRefreshFailing()
             Log.error("API returned 403 Forbidden")
         } catch {
             consecutiveFailureCount += 1
+            await maybeNotifyRefreshFailing()
             if usageData == nil {
                 // URLSession failures are wrapped as `APIError.networkError(URLError)`
                 // by the API client, so direct cast misses offline cases. Unwrap both
@@ -802,12 +824,42 @@ final class UsageViewModel {
         lastUpdateCheckAt = Date()
         async let result = UpdateChecker.shared.check()
         let start = ContinuousClock.now
-        lastUpdateCheckResult = await result
+        await recordUpdateCheckResult(await result, source: .manual)
         let elapsed = ContinuousClock.now - start
         if elapsed < .milliseconds(1200) {
             try? await Task.sleep(for: .milliseconds(1200) - elapsed)
         }
         isCheckingUpdate = false
+    }
+
+    /// Single recording point for update-check results (#83). Assigns
+    /// `lastUpdateCheckResult` and, for automatic sources only, fires the
+    /// release notification with write-before-send dedup: the version is
+    /// persisted before dispatch so overlapping check paths can't double-fire.
+    func recordUpdateCheckResult(_ result: UpdateCheckResult, source: UpdateCheckSource) async {
+        lastUpdateCheckResult = result
+        guard source == .automatic, case .available(let release) = result else { return }
+        let defaults = UserDefaults.standard
+        guard Self.shouldNotifyUpdate(
+            version: release.version,
+            lastNotified: defaults.object(for: .lastNotifiedUpdateVersion) as? String,
+            enabled: appStatusNotificationEnabled
+        ) else { return }
+        defaults.set(release.version, for: .lastNotifiedUpdateVersion)
+        if let updateAvailableNotifier {
+            await updateAvailableNotifier(release.version, release.htmlURL)
+        }
+    }
+
+    /// Fires the refresh-failing notification on the 4→5 transition only.
+    /// The unauthorized path never reaches this (it resets the counter and
+    /// routes to the session-expired notification, #76).
+    private func maybeNotifyRefreshFailing() async {
+        guard Self.shouldNotifyRefreshFailing(
+            failureCount: consecutiveFailureCount,
+            enabled: appStatusNotificationEnabled
+        ), let refreshFailingNotifier else { return }
+        await refreshFailingNotifier()
     }
 
     // MARK: - Private
