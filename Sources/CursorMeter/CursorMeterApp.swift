@@ -33,6 +33,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
+        // #83: app-status notification seams. Wired here (not defaulted in the
+        // view model) so a nil seam in the SPM test host can never reach
+        // UNUserNotificationCenter.
+        viewModel.updateAvailableNotifier = { [manager = notificationManager] version, releaseURL in
+            await manager.notifyUpdateAvailable(version: version, releaseURL: releaseURL)
+        }
+        viewModel.refreshFailingNotifier = { [manager = notificationManager] in
+            await manager.notifyRefreshFailing()
+        }
+
         UNUserNotificationCenter.current().delegate = self
 
         setupStatusItem()
@@ -259,23 +269,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
 
     // MARK: - UNUserNotificationCenterDelegate
 
-    /// Routes a clicked notification to the login window when it's the
-    /// session-expired banner (#79); other notifications keep the default
-    /// (no-op) click behavior since the app has no main window to activate into.
+    /// Routes a clicked notification via the pure `clickAction` router (#79, #83):
+    /// session-expired → login window, update-available → GitHub release page
+    /// (host-validated), refresh-failing → popover. Threshold/usage-jump keep
+    /// the default no-op since the app has no main window to activate into.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        let identifier = response.notification.request.identifier
-        if NotificationManager.clickAction(
-            forNotificationIdentifier: identifier,
+        let action = NotificationManager.clickAction(
+            forNotificationIdentifier: response.notification.request.identifier,
             userInfo: response.notification.request.content.userInfo
-        ) == .openLoginWindow {
+        )
+        switch action {
+        case .openLoginWindow:
             Task { @MainActor [weak self] in
                 NSApp.activate(ignoringOtherApps: true)
                 self?.showLogin()
             }
+        case .openReleaseURL(let url):
+            Task { @MainActor in
+                ExternalURL.openGitHub(url)
+            }
+        case .openPopover:
+            Task { @MainActor [weak self] in
+                NSApp.activate(ignoringOtherApps: true)
+                self?.showPopover()
+            }
+        case .none:
+            break
         }
         completionHandler()
     }
