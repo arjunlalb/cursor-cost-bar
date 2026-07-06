@@ -14,6 +14,7 @@ final class SettingsViewController: NSViewController {
 
     private var intervalPopUp = NSPopUpButton()
     private var notificationToggle = NSButton()
+    private var appStatusToggle = NSButton()
     private var thresholdBox = NSView()
     private var warningValueLabel = NSTextField()
     private var warningSlider = NSSlider()
@@ -156,6 +157,7 @@ final class SettingsViewController: NSViewController {
         // Notifications
         notificationToggle.state = viewModel.notificationEnabled ? .on : .off
         thresholdBox.isHidden = !viewModel.notificationEnabled
+        appStatusToggle.state = viewModel.appStatusNotificationEnabled ? .on : .off
 
         // Warning slider
         let warning = viewModel.warningThreshold
@@ -252,7 +254,12 @@ final class SettingsViewController: NSViewController {
         thresholdBox = thresholdStack
         thresholdBox.isHidden = !viewModel.notificationEnabled
 
-        let sectionStack = NSStackView(views: [notificationToggle, thresholdBox])
+        appStatusToggle = makeCheckbox(
+            title: "App status notifications (new version · connection errors)",
+            action: #selector(appStatusToggleChanged)
+        )
+
+        let sectionStack = NSStackView(views: [notificationToggle, thresholdBox, appStatusToggle])
         sectionStack.orientation = .vertical
         sectionStack.alignment = .left
         sectionStack.spacing = 6
@@ -475,6 +482,10 @@ final class SettingsViewController: NSViewController {
         // Same NSStackView caveat as the jump-effect toggle: animator().isHidden
         // causes a layout/alpha desync that reads as a "blink". Snap instead.
         thresholdBox.isHidden = !enabled
+    }
+
+    @objc private func appStatusToggleChanged() {
+        viewModel.setAppStatusNotificationEnabled(appStatusToggle.state == .on)
     }
 
     @objc private func warningSliderChanged() {

@@ -20,6 +20,8 @@ private enum SettingsKey: String {
     case jumpGlyphStyle
     case weeklyChartEnabled
     case weeklyChartStyle
+    case appStatusNotificationEnabled
+    case lastNotifiedUpdateVersion
     // Legacy keys consulted only by `loadSettings` migration block.
     case legacyShowMenuBarText = "showMenuBarText"
     case legacyShowMenuBarPercent = "showMenuBarPercent"
@@ -44,6 +46,13 @@ enum RefreshInterval: Int, CaseIterable {
         case .fifteenMinutes: "15 min"
         }
     }
+}
+
+/// Origin of an update-check result. Only automatic checks may notify —
+/// a manual check's result is already on screen in the settings window.
+enum UpdateCheckSource: Sendable, Equatable {
+    case automatic
+    case manual
 }
 
 // MARK: - Jump Effect Types
@@ -115,6 +124,17 @@ final class UsageViewModel {
     var isDataStale: Bool {
         usageData != nil && consecutiveFailureCount >= Self.staleThreshold
     }
+
+    /// Release notification eligibility (#83). Pure so dedup logic is unit-testable.
+    nonisolated static func shouldNotifyUpdate(version: String, lastNotified: String?, enabled: Bool) -> Bool {
+        enabled && version != lastNotified
+    }
+
+    /// Error notification fires exactly on the transition to stale (== not >=),
+    /// so failures 6, 7, … don't re-fire; a success resets the counter and re-arms.
+    nonisolated static func shouldNotifyRefreshFailing(failureCount: Int, enabled: Bool) -> Bool {
+        enabled && failureCount == staleThreshold
+    }
     /// Outcome of the most recent update check (nil = never checked this session).
     /// Settings UI consults this to distinguish "up to date" from "check failed";
     /// the popover only cares about `availableUpdate` (computed below).
@@ -139,6 +159,9 @@ final class UsageViewModel {
     var criticalThreshold: Int = 90
     /// 0 = none, 1 = fraction (e.g. 120/500), 2 = percent (e.g. 24%)
     var menuBarDisplayMode: Int = 0
+    /// Unified toggle for app-status notifications (#83): new-release and
+    /// refresh-failing. Independent of usage-threshold and jump settings.
+    var appStatusNotificationEnabled: Bool = true
 
     // MARK: - Jump Effect
 
@@ -179,6 +202,21 @@ final class UsageViewModel {
     /// test host, so tests always override this).
     @ObservationIgnored internal var sessionExpiredNotifier: (@MainActor () async -> Void)?
 
+    /// App-status notification hooks (#83), injectable for tests. Unlike
+    /// `sessionExpiredNotifier` these have NO real fallback: nil → skip.
+    /// Production wires them in CursorMeterApp; a nil seam must never reach
+    /// UNUserNotificationCenter (SPM test host crash) or queue work.
+    @ObservationIgnored internal var updateAvailableNotifier: (@MainActor (_ version: String, _ releaseURL: String) async -> Void)?
+    @ObservationIgnored internal var refreshFailingNotifier: (@MainActor () async -> Void)?
+
+    /// Update-check runner, injectable for tests (#83). The startup/periodic
+    /// checks otherwise hit the real GitHub API from the SPM test host (whose
+    /// Bundle version falls back to "0.0.0", making every release "newer") and
+    /// could write `lastNotifiedUpdateVersion` nondeterministically mid-suite.
+    @ObservationIgnored internal var updateCheckRunner: @MainActor () async -> UpdateCheckResult = {
+        await UpdateChecker.shared.check()
+    }
+
     // Previous canonical values for delta tracking. Reset to nil when display mode changes
     // (e.g. plan migration) so we don't compare across incompatible units.
     private var previousPlanUsedCents: Int?
@@ -217,7 +255,10 @@ final class UsageViewModel {
         self.apiClient = apiClient
         loadSettings()
         lastUpdateCheckAt = Date()
-        Task { lastUpdateCheckResult = await UpdateChecker.shared.check() }
+        Task {
+            let result = await updateCheckRunner()
+            await recordUpdateCheckResult(result, source: .automatic)
+        }
     }
 
     // MARK: - Session
@@ -397,7 +438,10 @@ final class UsageViewModel {
             // owning a timer — at most one API call per updateRecheckInterval.
             if Self.shouldRecheckUpdate(lastCheck: lastUpdateCheckAt, now: Date()) {
                 lastUpdateCheckAt = Date()
-                Task { lastUpdateCheckResult = await UpdateChecker.shared.check() }
+                Task {
+                    let result = await updateCheckRunner()
+                    await recordUpdateCheckResult(result, source: .automatic)
+                }
             }
 
             // Compute jump delta against previous canonical value (skip on first refresh,
@@ -467,9 +511,11 @@ final class UsageViewModel {
         } catch APIError.forbidden {
             errorMessage = "Access denied (subscription may be inactive)"
             consecutiveFailureCount += 1
+            await maybeNotifyRefreshFailing()
             Log.error("API returned 403 Forbidden")
         } catch {
             consecutiveFailureCount += 1
+            await maybeNotifyRefreshFailing()
             if usageData == nil {
                 // URLSession failures are wrapped as `APIError.networkError(URLError)`
                 // by the API client, so direct cast misses offline cases. Unwrap both
@@ -751,6 +797,11 @@ final class UsageViewModel {
         UserDefaults.standard.set(mode, for: .menuBarDisplayMode)
     }
 
+    func setAppStatusNotificationEnabled(_ enabled: Bool) {
+        appStatusNotificationEnabled = enabled
+        UserDefaults.standard.set(enabled, for: .appStatusNotificationEnabled)
+    }
+
     func setJumpEffectEnabled(_ enabled: Bool) {
         jumpEffectEnabled = enabled
         UserDefaults.standard.set(enabled, for: .jumpEffectEnabled)
@@ -779,14 +830,47 @@ final class UsageViewModel {
     func checkForUpdate() async {
         isCheckingUpdate = true
         lastUpdateCheckAt = Date()
-        async let result = UpdateChecker.shared.check()
+        async let result = updateCheckRunner()
         let start = ContinuousClock.now
-        lastUpdateCheckResult = await result
+        await recordUpdateCheckResult(await result, source: .manual)
         let elapsed = ContinuousClock.now - start
         if elapsed < .milliseconds(1200) {
             try? await Task.sleep(for: .milliseconds(1200) - elapsed)
         }
         isCheckingUpdate = false
+    }
+
+    /// Single recording point for update-check results (#83). Assigns
+    /// `lastUpdateCheckResult` and, for automatic sources only, fires the
+    /// release notification with write-before-send dedup: the version is
+    /// persisted before dispatch so overlapping check paths can't double-fire.
+    func recordUpdateCheckResult(_ result: UpdateCheckResult, source: UpdateCheckSource) async {
+        lastUpdateCheckResult = result
+        guard source == .automatic, case .available(let release) = result,
+              let updateAvailableNotifier
+        else { return }
+        let defaults = UserDefaults.standard
+        guard Self.shouldNotifyUpdate(
+            version: release.version,
+            lastNotified: defaults.object(for: .lastNotifiedUpdateVersion) as? String,
+            enabled: appStatusNotificationEnabled
+        ) else { return }
+        // A version counts as "notified" only when a dispatch is actually
+        // attempted (notifier wired) — but the write still precedes the await
+        // so overlapping check paths can't double-fire.
+        defaults.set(release.version, for: .lastNotifiedUpdateVersion)
+        await updateAvailableNotifier(release.version, release.htmlURL)
+    }
+
+    /// Fires the refresh-failing notification on the 4→5 transition only.
+    /// The unauthorized path never reaches this (it resets the counter and
+    /// routes to the session-expired notification, #76).
+    private func maybeNotifyRefreshFailing() async {
+        guard Self.shouldNotifyRefreshFailing(
+            failureCount: consecutiveFailureCount,
+            enabled: appStatusNotificationEnabled
+        ), let refreshFailingNotifier else { return }
+        await refreshFailingNotifier()
     }
 
     // MARK: - Private
@@ -818,6 +902,9 @@ final class UsageViewModel {
             } else if hadText {
                 menuBarDisplayMode = 1
             }
+        }
+        if let val = defaults.object(for: .appStatusNotificationEnabled) as? Bool {
+            appStatusNotificationEnabled = val
         }
         if let val = defaults.object(for: .jumpEffectEnabled) as? Bool {
             jumpEffectEnabled = val
