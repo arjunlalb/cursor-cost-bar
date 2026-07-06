@@ -52,20 +52,31 @@ final class AppStatusNotificationTests: XCTestCase {
         XCTAssertFalse(UsageViewModel.shouldNotifyRefreshFailing(failureCount: 5, enabled: false))
     }
 
+    // MARK: - Helpers
+
+    /// Bare view model with the startup update check stubbed off the network —
+    /// the real check runs from `init` and could nondeterministically write
+    /// `lastNotifiedUpdateVersion` mid-suite (test host version is "0.0.0").
+    private func makeViewModel() -> UsageViewModel {
+        let vm = UsageViewModel()
+        vm.updateCheckRunner = { .upToDate }
+        return vm
+    }
+
     // MARK: - Settings persistence
 
     func testAppStatusNotificationDefaultsToEnabled() {
-        let vm = UsageViewModel()
+        let vm = makeViewModel()
         XCTAssertTrue(vm.appStatusNotificationEnabled)
     }
 
     func testSetAppStatusNotificationPersistsAndReloads() {
-        let vm = UsageViewModel()
+        let vm = makeViewModel()
         vm.setAppStatusNotificationEnabled(false)
         XCTAssertFalse(vm.appStatusNotificationEnabled)
         XCTAssertEqual(UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool, false)
 
-        let reloaded = UsageViewModel()
+        let reloaded = makeViewModel()
         XCTAssertFalse(reloaded.appStatusNotificationEnabled)
     }
 
@@ -78,7 +89,7 @@ final class AppStatusNotificationTests: XCTestCase {
     )
 
     func testAutomaticAvailableResultNotifiesOncePerVersion() async {
-        let vm = UsageViewModel()
+        let vm = makeViewModel()
         var notified: [(String, String)] = []
         vm.updateAvailableNotifier = { version, url in notified.append((version, url)) }
 
@@ -95,7 +106,7 @@ final class AppStatusNotificationTests: XCTestCase {
     }
 
     func testManualCheckRecordsButNeverNotifies() async {
-        let vm = UsageViewModel()
+        let vm = makeViewModel()
         var notifyCount = 0
         vm.updateAvailableNotifier = { _, _ in notifyCount += 1 }
 
@@ -107,7 +118,7 @@ final class AppStatusNotificationTests: XCTestCase {
     }
 
     func testDisabledToggleSuppressesUpdateNotification() async {
-        let vm = UsageViewModel()
+        let vm = makeViewModel()
         vm.setAppStatusNotificationEnabled(false)
         var notifyCount = 0
         vm.updateAvailableNotifier = { _, _ in notifyCount += 1 }
@@ -119,7 +130,7 @@ final class AppStatusNotificationTests: XCTestCase {
     }
 
     func testUpToDateAndFailedResultsNeverNotify() async {
-        let vm = UsageViewModel()
+        let vm = makeViewModel()
         var notifyCount = 0
         vm.updateAvailableNotifier = { _, _ in notifyCount += 1 }
 
@@ -140,6 +151,7 @@ final class AppStatusNotificationTests: XCTestCase {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockURLProtocol.self]
         let vm = UsageViewModel(apiClient: CursorAPIClient(configuration: config))
+        vm.updateCheckRunner = { .upToDate }
         vm.keychainDeleteHandler = {}
         vm.sessionExpiredNotifier = { spy.sessionExpiredCount += 1 }
         vm.refreshFailingNotifier = { spy.refreshFailingCount += 1 }

@@ -209,6 +209,14 @@ final class UsageViewModel {
     @ObservationIgnored internal var updateAvailableNotifier: (@MainActor (_ version: String, _ releaseURL: String) async -> Void)?
     @ObservationIgnored internal var refreshFailingNotifier: (@MainActor () async -> Void)?
 
+    /// Update-check runner, injectable for tests (#83). The startup/periodic
+    /// checks otherwise hit the real GitHub API from the SPM test host (whose
+    /// Bundle version falls back to "0.0.0", making every release "newer") and
+    /// could write `lastNotifiedUpdateVersion` nondeterministically mid-suite.
+    @ObservationIgnored internal var updateCheckRunner: @MainActor () async -> UpdateCheckResult = {
+        await UpdateChecker.shared.check()
+    }
+
     // Previous canonical values for delta tracking. Reset to nil when display mode changes
     // (e.g. plan migration) so we don't compare across incompatible units.
     private var previousPlanUsedCents: Int?
@@ -248,7 +256,7 @@ final class UsageViewModel {
         loadSettings()
         lastUpdateCheckAt = Date()
         Task {
-            let result = await UpdateChecker.shared.check()
+            let result = await updateCheckRunner()
             await recordUpdateCheckResult(result, source: .automatic)
         }
     }
@@ -431,7 +439,7 @@ final class UsageViewModel {
             if Self.shouldRecheckUpdate(lastCheck: lastUpdateCheckAt, now: Date()) {
                 lastUpdateCheckAt = Date()
                 Task {
-                    let result = await UpdateChecker.shared.check()
+                    let result = await updateCheckRunner()
                     await recordUpdateCheckResult(result, source: .automatic)
                 }
             }
@@ -822,7 +830,7 @@ final class UsageViewModel {
     func checkForUpdate() async {
         isCheckingUpdate = true
         lastUpdateCheckAt = Date()
-        async let result = UpdateChecker.shared.check()
+        async let result = updateCheckRunner()
         let start = ContinuousClock.now
         await recordUpdateCheckResult(await result, source: .manual)
         let elapsed = ContinuousClock.now - start
@@ -838,17 +846,20 @@ final class UsageViewModel {
     /// persisted before dispatch so overlapping check paths can't double-fire.
     func recordUpdateCheckResult(_ result: UpdateCheckResult, source: UpdateCheckSource) async {
         lastUpdateCheckResult = result
-        guard source == .automatic, case .available(let release) = result else { return }
+        guard source == .automatic, case .available(let release) = result,
+              let updateAvailableNotifier
+        else { return }
         let defaults = UserDefaults.standard
         guard Self.shouldNotifyUpdate(
             version: release.version,
             lastNotified: defaults.object(for: .lastNotifiedUpdateVersion) as? String,
             enabled: appStatusNotificationEnabled
         ) else { return }
+        // A version counts as "notified" only when a dispatch is actually
+        // attempted (notifier wired) — but the write still precedes the await
+        // so overlapping check paths can't double-fire.
         defaults.set(release.version, for: .lastNotifiedUpdateVersion)
-        if let updateAvailableNotifier {
-            await updateAvailableNotifier(release.version, release.htmlURL)
-        }
+        await updateAvailableNotifier(release.version, release.htmlURL)
     }
 
     /// Fires the refresh-failing notification on the 4→5 transition only.
