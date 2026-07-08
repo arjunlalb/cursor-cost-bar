@@ -589,8 +589,7 @@ final class WeeklyUsageTests: XCTestCase {
             onDemandEnabled: nil,
             isOnDemandActive: false,
             cycleStartDate: cycleStart.map { date($0) },
-            resetDate: cycleEnd.map { date($0) },
-            daysUntilReset: nil
+            resetDate: cycleEnd.map { date($0) }
         )
     }
 

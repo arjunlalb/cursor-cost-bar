@@ -150,7 +150,6 @@ struct UsageDisplayData: Sendable {
     let isOnDemandActive: Bool
     let cycleStartDate: Date?
     let resetDate: Date?
-    let daysUntilReset: Int?
 
     /// Returns a copy with `isOnDemandActive` overridden. Used by UsageViewModel
     /// to inject the sticky-latched mode after computing it.
@@ -165,8 +164,7 @@ struct UsageDisplayData: Sendable {
             onDemandEnabled: onDemandEnabled,
             isOnDemandActive: active,
             cycleStartDate: cycleStartDate,
-            resetDate: resetDate,
-            daysUntilReset: daysUntilReset
+            resetDate: resetDate
         )
     }
 
@@ -317,11 +315,36 @@ struct UsageDisplayData: Sendable {
         return requestsLimit / days
     }
 
+    /// Render-time countdown label (#85). Pure so zone boundaries are
+    /// unit-testable with an injected `now`. Floor in every zone: no unit
+    /// overflow ("60m"/"48h" never render) and each zone hands off smoothly
+    /// to the next. Days use elapsed seconds, not calendar days — DST/zone
+    /// independent, and indistinguishable at ≥ 48h remaining.
+    nonisolated static func resetCountdownText(until reset: Date, now: Date) -> String {
+        let delta = reset.timeIntervalSince(now)
+        if delta <= 0 { return "Resets today" }
+        if delta < 60 { return "Resets in <1m" }
+        if delta < 3600 { return "Resets in \(Int(delta / 60))m" }
+        if delta < 48 * 3600 { return "Resets in \(Int(delta / 3600))h" }
+        return "Resets in \(Int(delta / 86400)) days"
+    }
+
     var resetText: String? {
-        guard let days = daysUntilReset else { return nil }
-        if days <= 0 { return "Resets today" }
-        if days == 1 { return "Resets tomorrow" }
-        return "Resets in \(days) days"
+        guard let resetDate else { return nil }
+        return Self.resetCountdownText(until: resetDate, now: Date())
+    }
+
+    /// Local wall-clock cycle end for the tooltip, e.g. "7/10 07:24" (#85).
+    /// Formatter is created per call: once per updateUI() makes caching
+    /// pointless, and a shared mutable DateFormatter global is a concurrency
+    /// footgun. Locale/calendar pinned so digits don't drift by user locale.
+    var resetAbsoluteText: String? {
+        guard let resetDate else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "M/d HH:mm"
+        return formatter.string(from: resetDate)
     }
 
     private nonisolated(unsafe) static let iso8601: ISO8601DateFormatter = {
@@ -335,11 +358,6 @@ struct UsageDisplayData: Sendable {
     private static func parseDate(_ string: String?) -> Date? {
         guard let string else { return nil }
         return iso8601.date(from: string)
-    }
-
-    private static func daysUntilReset(to resetDate: Date?) -> Int? {
-        guard let resetDate else { return nil }
-        return Calendar.current.dateComponents([.day], from: Date(), to: resetDate).day
     }
 
     private static func requestCount(_ model: ModelUsage?) -> Int {
@@ -428,8 +446,7 @@ struct UsageDisplayData: Sendable {
             onDemandEnabled: onDemandEnabled,
             isOnDemandActive: false,
             cycleStartDate: parseDate(summary.billingCycleStart),
-            resetDate: resetDate,
-            daysUntilReset: daysUntilReset(to: resetDate)
+            resetDate: resetDate
         )
     }
 
@@ -455,8 +472,7 @@ struct UsageDisplayData: Sendable {
             onDemandEnabled: nil,
             isOnDemandActive: false,
             cycleStartDate: nil,
-            resetDate: resetDate,
-            daysUntilReset: daysUntilReset(to: resetDate)
+            resetDate: resetDate
         )
     }
 }

@@ -254,7 +254,6 @@ private func makeFixture(
     isOnDemandActive: Bool = false,
     cycleStartDate: Date? = nil,
     resetDate: Date? = nil,
-    daysUntilReset: Int? = 5
 ) -> UsageDisplayData {
     UsageDisplayData(
         email: email,
@@ -270,7 +269,6 @@ private func makeFixture(
         onDemandEnabled: onDemandEnabled,
         isOnDemandActive: isOnDemandActive,
         cycleStartDate: cycleStartDate,
-        resetDate: resetDate,
-        daysUntilReset: daysUntilReset
+        resetDate: resetDate
     )
 }
