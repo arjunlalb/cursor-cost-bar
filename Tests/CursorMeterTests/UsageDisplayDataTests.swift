@@ -102,7 +102,12 @@ final class UsageDisplayDataTests: XCTestCase {
         var components = DateComponents()
         components.year = 2026; components.month = 7; components.day = 10
         components.hour = 7; components.minute = 24
-        let date = Calendar.current.date(from: components)!
+        // Explicit Gregorian: the production formatter is pinned to Gregorian,
+        // so building the fixture with Calendar.current would diverge on a
+        // non-Gregorian system calendar (Japanese/Buddhist/etc.).
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = .current
+        let date = gregorian.date(from: components)!
         let data = makeData(used: 0, limit: 100, resetDate: date)
         XCTAssertEqual(data.resetAbsoluteText, "7/10 07:24")
     }
