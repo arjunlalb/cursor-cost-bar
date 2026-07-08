@@ -41,7 +41,12 @@ with `delta = reset.timeIntervalSince(now)`:
 | `delta < 60` | `"Resets in <1m"` | Sub-minute precision is noise |
 | `delta < 3600` | `"Resets in 40m"` | `Int(delta / 60)` — floor |
 | `delta < 48 * 3600` | `"Resets in 31h"` | `Int(delta / 3600)` — floor |
-| otherwise | `"Resets in N days"` | Calendar-day count (`dateComponents([.day], from: now, to: reset)`), always ≥ 2 in this branch |
+| otherwise | `"Resets in N days"` | `Int(delta / 86400)` — elapsed-seconds floor, always ≥ 2 in this branch |
+
+Days are computed from elapsed seconds, not `Calendar.dateComponents([.day], ...)`
+(rev 2, Codex review): pure delta math is DST/timezone-independent and keeps
+every zone deterministic under injected-`now` tests. The behavioral shift
+(calendar days → 24h blocks) is imperceptible at ≥ 48h remaining.
 
 Floor everywhere: no unit overflow ("60m"/"48h" are never rendered), and
 each zone hands off smoothly to the next ("1h" → … → "59m" → … → "<1m").
@@ -49,10 +54,13 @@ each zone hands off smoothly to the next ("1h" → … → "59m" → … → "<1
 
 `resetText` becomes a computed property calling the pure function with
 `Date()`; returns nil when `resetDate` is nil (unchanged nil contract).
-It is evaluated on every `MenuBarView.updateUI()` — popover open and every
-observation-driven refresh — so the displayed value is fresh at the moment
-the user looks at it. No live tick while the popover stays open (decided:
-popover is a transient surface; a timer is not worth the machinery).
+It is evaluated on every `MenuBarView.updateUI()`. **`showPopover()` today
+does not call `updateUI()`** (updates are observation- and timer-driven
+only), so freshness-on-open requires adding one `updateUI()` call in
+`CursorMeterApp.showPopover()` — part of this change (rev 2, Codex review).
+No live tick while the popover stays open (decided: popover is a transient
+surface). Accepted consequence: with the popover held open near a boundary,
+the label can lag until the next refresh or reopen.
 
 ### 2. Absolute-time tooltip
 
@@ -62,8 +70,12 @@ New computed property:
 var resetAbsoluteText: String?   // e.g. "7/10 07:24" (local time zone)
 ```
 
-Formatted with a fixed `DateFormatter` (`dateFormat = "M/d HH:mm"`, cached
-in a static, `nonisolated(unsafe)` like the existing `iso8601` formatter).
+Formatted with a `DateFormatter` created locally per call (rev 2: a shared
+`nonisolated(unsafe)` mutable `DateFormatter` global is a concurrency
+footgun, and the call rate — once per `updateUI()` — makes caching
+pointless). Pinned: `locale = en_US_POSIX`, `calendar = .gregorian`,
+`dateFormat = "M/d HH:mm"`, time zone left at the user's current zone
+(local wall-clock display is the point).
 `MenuBarView.updateUI()` assigns it to `resetLabel.toolTip` unconditionally
 (nil clears the tooltip). Always set, not only when imminent — one line,
 zero cost.
@@ -105,6 +117,12 @@ injected `now` (all offsets relative to a fixed date):
 Plus: `resetText` nil when `resetDate` nil; `resetAbsoluteText` format
 check with a fixed Date; existing `UsageDisplayDataTests` resetText cases
 migrate from `daysUntilReset:`-based fixtures to `resetDate:`-based ones.
+
+Migration scope (rev 2): every `UsageDisplayData(...)` memberwise call site
+loses the `daysUntilReset:` argument — `UsageDisplayDataTests`,
+`UsageViewModelTests`, `UsageViewModelJumpTests`, `WeeklyUsageTests` — and
+direct `daysUntilReset` assertions in `UsageDisplayDataTests` are replaced
+with `resetDate`/`resetText` assertions.
 
 ## Workflow Notes
 
