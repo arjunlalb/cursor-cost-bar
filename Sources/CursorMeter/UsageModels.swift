@@ -150,7 +150,6 @@ struct UsageDisplayData: Sendable {
     let isOnDemandActive: Bool
     let cycleStartDate: Date?
     let resetDate: Date?
-    let daysUntilReset: Int?
 
     /// Returns a copy with `isOnDemandActive` overridden. Used by UsageViewModel
     /// to inject the sticky-latched mode after computing it.
@@ -165,8 +164,7 @@ struct UsageDisplayData: Sendable {
             onDemandEnabled: onDemandEnabled,
             isOnDemandActive: active,
             cycleStartDate: cycleStartDate,
-            resetDate: resetDate,
-            daysUntilReset: daysUntilReset
+            resetDate: resetDate
         )
     }
 
@@ -332,10 +330,8 @@ struct UsageDisplayData: Sendable {
     }
 
     var resetText: String? {
-        guard let days = daysUntilReset else { return nil }
-        if days <= 0 { return "Resets today" }
-        if days == 1 { return "Resets tomorrow" }
-        return "Resets in \(days) days"
+        guard let resetDate else { return nil }
+        return Self.resetCountdownText(until: resetDate, now: Date())
     }
 
     private nonisolated(unsafe) static let iso8601: ISO8601DateFormatter = {
@@ -349,11 +345,6 @@ struct UsageDisplayData: Sendable {
     private static func parseDate(_ string: String?) -> Date? {
         guard let string else { return nil }
         return iso8601.date(from: string)
-    }
-
-    private static func daysUntilReset(to resetDate: Date?) -> Int? {
-        guard let resetDate else { return nil }
-        return Calendar.current.dateComponents([.day], from: Date(), to: resetDate).day
     }
 
     private static func requestCount(_ model: ModelUsage?) -> Int {
@@ -442,8 +433,7 @@ struct UsageDisplayData: Sendable {
             onDemandEnabled: onDemandEnabled,
             isOnDemandActive: false,
             cycleStartDate: parseDate(summary.billingCycleStart),
-            resetDate: resetDate,
-            daysUntilReset: daysUntilReset(to: resetDate)
+            resetDate: resetDate
         )
     }
 
@@ -469,8 +459,7 @@ struct UsageDisplayData: Sendable {
             onDemandEnabled: nil,
             isOnDemandActive: false,
             cycleStartDate: nil,
-            resetDate: resetDate,
-            daysUntilReset: daysUntilReset(to: resetDate)
+            resetDate: resetDate
         )
     }
 }

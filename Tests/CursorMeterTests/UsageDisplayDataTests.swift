@@ -47,28 +47,13 @@ final class UsageDisplayDataTests: XCTestCase {
 
     // MARK: - resetText
 
-    func testResetTextNilDays() {
-        let data = makeData(used: 0, limit: 100, daysUntilReset: nil)
+    func testResetTextNilWhenNoResetDate() {
+        let data = makeData(used: 0, limit: 100)
         XCTAssertNil(data.resetText)
     }
 
-    func testResetTextToday() {
-        let data = makeData(used: 0, limit: 100, daysUntilReset: 0)
-        XCTAssertEqual(data.resetText, "Resets today")
-    }
-
-    func testResetTextNegativeDays() {
-        let data = makeData(used: 0, limit: 100, daysUntilReset: -1)
-        XCTAssertEqual(data.resetText, "Resets today")
-    }
-
-    func testResetTextTomorrow() {
-        let data = makeData(used: 0, limit: 100, daysUntilReset: 1)
-        XCTAssertEqual(data.resetText, "Resets tomorrow")
-    }
-
-    func testResetTextMultipleDays() {
-        let data = makeData(used: 0, limit: 100, daysUntilReset: 14)
+    func testResetTextComputedFromResetDate() {
+        let data = makeData(used: 0, limit: 100, resetDate: Date().addingTimeInterval(14 * 86400 + 3600))
         XCTAssertEqual(data.resetText, "Resets in 14 days")
     }
 
@@ -136,7 +121,7 @@ final class UsageDisplayDataTests: XCTestCase {
         XCTAssertEqual(data.requestsUsed, 0)
         XCTAssertEqual(data.requestsLimit, 0)
         XCTAssertNil(data.resetDate)
-        XCTAssertNil(data.daysUntilReset)
+        XCTAssertNil(data.resetText)
     }
 
     func testFromWithNilModelUsageFields() {
@@ -160,7 +145,7 @@ final class UsageDisplayDataTests: XCTestCase {
         let data = UsageDisplayData.from(usage: usage, userInfo: userInfo)
 
         XCTAssertNotNil(data.resetDate, "resetDate should be parsed from startOfMonth")
-        XCTAssertNotNil(data.daysUntilReset)
+        XCTAssertNotNil(data.resetText)
 
         let calendar = Calendar.current
         let components = calendar.dateComponents([.year, .month], from: data.resetDate!)
@@ -179,7 +164,7 @@ final class UsageDisplayDataTests: XCTestCase {
         let data = UsageDisplayData.from(usage: usage, userInfo: userInfo)
 
         XCTAssertNil(data.resetDate)
-        XCTAssertNil(data.daysUntilReset)
+        XCTAssertNil(data.resetText)
     }
 
     // MARK: - from(summary:usage:userInfo:) integrated factory
@@ -231,7 +216,7 @@ final class UsageDisplayDataTests: XCTestCase {
         let data = UsageDisplayData.from(summary: summary, usage: nil, userInfo: userInfo)
 
         XCTAssertNil(data.resetDate)
-        XCTAssertNil(data.daysUntilReset)
+        XCTAssertNil(data.resetText)
     }
 
     // MARK: - Dynamic key parsing (primaryModel)
@@ -375,7 +360,7 @@ final class UsageDisplayDataTests: XCTestCase {
     private func makeData(
         used: Int,
         limit: Int,
-        daysUntilReset: Int? = 5
+        resetDate: Date? = nil
     ) -> UsageDisplayData {
         UsageDisplayData(
             email: "test@test.com",
@@ -391,8 +376,7 @@ final class UsageDisplayDataTests: XCTestCase {
             onDemandEnabled: nil,
             isOnDemandActive: false,
             cycleStartDate: nil,
-            resetDate: nil,
-            daysUntilReset: daysUntilReset
+            resetDate: resetDate
         )
     }
 
@@ -446,7 +430,7 @@ final class UsageDisplayDataTests: XCTestCase {
             onDemandUsedCents: nil, onDemandLimitCents: nil,
             onDemandEnabled: nil,
             isOnDemandActive: false,
-            cycleStartDate: nil, resetDate: nil, daysUntilReset: 5
+            cycleStartDate: nil, resetDate: nil
         )
         XCTAssertTrue(data.isPercentOnly)
         XCTAssertEqual(data.percentUsed, 5.5, accuracy: 0.01)
@@ -780,8 +764,7 @@ final class UsageDisplayDataTests: XCTestCase {
             onDemandEnabled: false,
             isOnDemandActive: false,
             cycleStartDate: nil,
-            resetDate: nil,
-            daysUntilReset: 5
+            resetDate: nil
         )
         XCTAssertFalse(data.hasOnDemand)
     }
@@ -801,8 +784,7 @@ final class UsageDisplayDataTests: XCTestCase {
             onDemandEnabled: nil,
             isOnDemandActive: false,
             cycleStartDate: nil,
-            resetDate: nil,
-            daysUntilReset: 5
+            resetDate: nil
         )
         XCTAssertTrue(data.hasOnDemand)
     }
@@ -1032,16 +1014,14 @@ final class UsageDisplayDataTests: XCTestCase {
             onDemandEnabled: onDemandEnabled,
             isOnDemandActive: isOnDemandActive,
             cycleStartDate: nil,
-            resetDate: nil,
-            daysUntilReset: 5
+            resetDate: nil
         )
     }
 
     private func makeCreditData(
         usedCents: Int,
         limitCents: Int,
-        serverPercent: Double? = nil,
-        daysUntilReset: Int? = 5
+        serverPercent: Double? = nil
     ) -> UsageDisplayData {
         UsageDisplayData(
             email: "test@test.com",
@@ -1057,8 +1037,7 @@ final class UsageDisplayDataTests: XCTestCase {
             onDemandEnabled: nil,
             isOnDemandActive: false,
             cycleStartDate: nil,
-            resetDate: nil,
-            daysUntilReset: daysUntilReset
+            resetDate: nil
         )
     }
 
