@@ -334,6 +334,19 @@ struct UsageDisplayData: Sendable {
         return Self.resetCountdownText(until: resetDate, now: Date())
     }
 
+    /// Local wall-clock cycle end for the tooltip, e.g. "7/10 07:24" (#85).
+    /// Formatter is created per call: once per updateUI() makes caching
+    /// pointless, and a shared mutable DateFormatter global is a concurrency
+    /// footgun. Locale/calendar pinned so digits don't drift by user locale.
+    var resetAbsoluteText: String? {
+        guard let resetDate else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "M/d HH:mm"
+        return formatter.string(from: resetDate)
+    }
+
     private nonisolated(unsafe) static let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

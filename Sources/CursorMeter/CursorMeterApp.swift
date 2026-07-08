@@ -144,6 +144,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     private func showPopover() {
         guard let button = statusItem.button else { return }
         NSApp.activate(ignoringOtherApps: true)
+        // Countdown text is render-time-computed (#85); refresh it at the
+        // moment of opening rather than waiting for the next observation tick.
+        (popover.contentViewController as? MenuBarPopoverViewController)?.updateUI()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         installPopoverDismissMonitor()
     }

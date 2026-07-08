@@ -96,6 +96,22 @@ final class UsageDisplayDataTests: XCTestCase {
         XCTAssertEqual(countdown(14 * 86400), "Resets in 14 days")
     }
 
+    // MARK: - resetAbsoluteText (#85 tooltip)
+
+    func testResetAbsoluteTextFormat() {
+        var components = DateComponents()
+        components.year = 2026; components.month = 7; components.day = 10
+        components.hour = 7; components.minute = 24
+        let date = Calendar.current.date(from: components)!
+        let data = makeData(used: 0, limit: 100, resetDate: date)
+        XCTAssertEqual(data.resetAbsoluteText, "7/10 07:24")
+    }
+
+    func testResetAbsoluteTextNilWhenNoResetDate() {
+        let data = makeData(used: 0, limit: 100)
+        XCTAssertNil(data.resetAbsoluteText)
+    }
+
     // MARK: - from(usage:userInfo:) legacy factory
 
     func testFromWithValidData() {

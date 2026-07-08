@@ -502,6 +502,7 @@ final class MenuBarPopoverViewController: NSViewController {
 
         // Reset
         resetLabel.stringValue = data.resetText ?? ""
+        resetLabel.toolTip = data.resetAbsoluteText
 
         // Interval popup
         syncIntervalPopUp()
