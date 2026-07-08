@@ -317,6 +317,20 @@ struct UsageDisplayData: Sendable {
         return requestsLimit / days
     }
 
+    /// Render-time countdown label (#85). Pure so zone boundaries are
+    /// unit-testable with an injected `now`. Floor in every zone: no unit
+    /// overflow ("60m"/"48h" never render) and each zone hands off smoothly
+    /// to the next. Days use elapsed seconds, not calendar days — DST/zone
+    /// independent, and indistinguishable at ≥ 48h remaining.
+    nonisolated static func resetCountdownText(until reset: Date, now: Date) -> String {
+        let delta = reset.timeIntervalSince(now)
+        if delta <= 0 { return "Resets today" }
+        if delta < 60 { return "Resets in <1m" }
+        if delta < 3600 { return "Resets in \(Int(delta / 60))m" }
+        if delta < 48 * 3600 { return "Resets in \(Int(delta / 3600))h" }
+        return "Resets in \(Int(delta / 86400)) days"
+    }
+
     var resetText: String? {
         guard let days = daysUntilReset else { return nil }
         if days <= 0 { return "Resets today" }

@@ -72,6 +72,45 @@ final class UsageDisplayDataTests: XCTestCase {
         XCTAssertEqual(data.resetText, "Resets in 14 days")
     }
 
+    // MARK: - resetCountdownText (#85 fine-grained countdown)
+
+    private static let fixedNow = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func countdown(_ delta: TimeInterval) -> String {
+        UsageDisplayData.resetCountdownText(
+            until: Self.fixedNow.addingTimeInterval(delta),
+            now: Self.fixedNow
+        )
+    }
+
+    func testCountdownPastDeadline() {
+        XCTAssertEqual(countdown(-3600), "Resets today")
+        XCTAssertEqual(countdown(0), "Resets today")
+    }
+
+    func testCountdownSubMinute() {
+        XCTAssertEqual(countdown(59), "Resets in <1m")
+    }
+
+    func testCountdownMinutes() {
+        XCTAssertEqual(countdown(60), "Resets in 1m")
+        XCTAssertEqual(countdown(40 * 60 + 30), "Resets in 40m")
+        XCTAssertEqual(countdown(59 * 60 + 59), "Resets in 59m")
+    }
+
+    func testCountdownHours() {
+        XCTAssertEqual(countdown(3600), "Resets in 1h")
+        XCTAssertEqual(countdown(3600 + 60), "Resets in 1h")
+        XCTAssertEqual(countdown(31 * 3600), "Resets in 31h")
+        XCTAssertEqual(countdown(48 * 3600 - 60), "Resets in 47h")
+    }
+
+    func testCountdownDays() {
+        XCTAssertEqual(countdown(48 * 3600), "Resets in 2 days")
+        XCTAssertEqual(countdown(49 * 3600), "Resets in 2 days")
+        XCTAssertEqual(countdown(14 * 86400), "Resets in 14 days")
+    }
+
     // MARK: - from(usage:userInfo:) legacy factory
 
     func testFromWithValidData() {
