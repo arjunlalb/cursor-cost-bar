@@ -6,7 +6,15 @@ import XCTest
 @MainActor
 final class CredentialChainTests: XCTestCase {
 
+    private static let suppressedKey = "ideAuthSuppressed"
+
+    override func setUp() {
+        super.setUp()
+        UserDefaults.standard.removeObject(forKey: Self.suppressedKey)
+    }
+
     override func tearDown() {
+        UserDefaults.standard.removeObject(forKey: Self.suppressedKey)
         MockURLProtocol.requestHandler = nil
         super.tearDown()
     }
@@ -139,6 +147,76 @@ final class CredentialChainTests: XCTestCase {
         XCTAssertEqual(vm.authState, .loginRequired)
         XCTAssertNil(vm.activeAuthSource)
         XCTAssertEqual(expiredNotifications, 1, "single expiry flow for the whole chain")
+    }
+
+    // MARK: - Logout suppression / connect / account switch (#54 Task 4)
+
+    /// successHandler variant with a parameterized auth/me email.
+    private static func emailHandler(_ email: String) -> (URLRequest) throws -> (HTTPURLResponse, Data) {
+        let base = successHandler { _ in }
+        return { request in
+            if request.url!.path == "/api/auth/me" {
+                let ok = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+                return (ok, Data("{\"email\":\"\(email)\",\"name\":\"T\"}".utf8))
+            }
+            return try base(request)
+        }
+    }
+
+    func testLogoutSuppressesIDESource() async {
+        let vm = makeViewModel()
+        vm.ideCredentialProvider = { Self.ideCredential }
+        let box = CookieBox()
+        MockURLProtocol.requestHandler = Self.successHandler { box.append($0) }
+
+        await vm.refresh()
+        XCTAssertEqual(vm.authState, .loggedIn)
+
+        vm.logout()
+        XCTAssertTrue(vm.ideAuthSuppressed)
+        XCTAssertEqual(vm.authState, .loggedOut)
+        XCTAssertNil(vm.activeAuthSource)
+
+        let callsBefore = box.all.count
+        await vm.refresh()
+        XCTAssertEqual(vm.authState, .loginRequired, "suppressed IDE + no cookie = logged out")
+        XCTAssertEqual(box.all.count, callsBefore, "no API call while suppressed")
+    }
+
+    func testConnectViaIDEClearsSuppressionAndRefreshes() async {
+        let vm = makeViewModel()
+        vm.ideCredentialProvider = { Self.ideCredential }
+        MockURLProtocol.requestHandler = Self.successHandler { _ in }
+
+        vm.logout()
+        vm.connectViaIDE()
+        XCTAssertFalse(vm.ideAuthSuppressed)
+        vm.stopAutoRefreshForTests()
+        await vm.refresh()
+        XCTAssertEqual(vm.activeAuthSource, .cursorIDE)
+    }
+
+    func testBrowserLoginClearsSuppression() {
+        let vm = makeViewModel()
+        MockURLProtocol.requestHandler = Self.successHandler { _ in }
+        vm.logout()
+        XCTAssertTrue(vm.ideAuthSuppressed)
+        vm.onLoginSuccess(cookieHeader: "WorkosCursorSessionToken=fresh")
+        XCTAssertFalse(vm.ideAuthSuppressed, "explicit reconnect intent clears suppression")
+    }
+
+    func testAccountSwitchResetsPerAccountState() async {
+        let vm = makeViewModel()
+        vm.ideCredentialProvider = { Self.ideCredential }
+        MockURLProtocol.requestHandler = Self.emailHandler("alice@t.com")
+        await vm.refresh()
+        XCTAssertEqual(vm.usageData?.email, "alice@t.com")
+        vm.testHook_seedWeeklyData([DayUsage(date: Date(), requests: 1, isToday: true, isOnDemand: false, onDemandCents: 0, totalChargedCents: 0)])
+
+        MockURLProtocol.requestHandler = Self.emailHandler("bob@t.com")
+        await vm.refresh()
+        XCTAssertEqual(vm.usageData?.email, "bob@t.com")
+        XCTAssertNil(vm.weeklyData, "per-account state reset on account switch")
     }
 }
 

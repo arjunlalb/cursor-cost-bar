@@ -29,6 +29,7 @@ private enum SettingsKey: String {
     case appStatusNotificationEnabled
     case lastNotifiedUpdateVersion
     case sessionExpiryHistory
+    case ideAuthSuppressed
     // Legacy keys consulted only by `loadSettings` migration block.
     case legacyShowMenuBarText = "showMenuBarText"
     case legacyShowMenuBarPercent = "showMenuBarPercent"
@@ -299,14 +300,30 @@ final class UsageViewModel {
             if let header = try KeychainStore.loadCookieHeader() {
                 cachedCookieHeader = header
                 startSession()
+                return
             }
         } catch {
             Log.error("Failed to load keychain: \(error)")
         }
+        // No captured cookie — the IDE source may still authenticate (#54).
+        if !ideAuthSuppressed, ideCredentialProvider != nil {
+            startSession()
+        }
+    }
+
+    /// Re-enables the IDE credential source after a logout and starts a
+    /// session; the chain resolves the actual credential on refresh (#54).
+    func connectViaIDE() {
+        ideAuthSuppressed = false
+        UserDefaults.standard.set(false, for: .ideAuthSuppressed)
+        startSession()
     }
 
     func onLoginSuccess(cookieHeader: String) {
         cachedCookieHeader = cookieHeader
+        // Explicit reconnect intent — re-enable the IDE source too (#54).
+        ideAuthSuppressed = false
+        UserDefaults.standard.set(false, for: .ideAuthSuppressed)
         // The previous session's per-account caches must not leak into the
         // new account — a user signing in to a different team would
         // otherwise see the prior team's weekly data, baselines, and
@@ -319,6 +336,24 @@ final class UsageViewModel {
             Log.error("Failed to save cookie: \(error)")
         }
         startSession()
+    }
+
+    /// Identity of the account behind the last successful refresh (#54).
+    @ObservationIgnored private var lastAccountEmail: String?
+
+    private func resetIfAccountSwitched(newEmail: String?) {
+        guard let newEmail else { return }
+        defer { lastAccountEmail = newEmail }
+        guard let previous = lastAccountEmail, previous != newEmail else { return }
+        Log.error("Account switched — resetting per-account state (#54)")
+        resetPerAccountState()
+        notificationManager.resetNotifications()
+        previousPlanUsedCents = nil
+        previousRequestsUsed = nil
+        previousServerPercent = nil
+        previousOnDemandUsedCents = nil
+        previousMode = nil
+        lastJump = nil
     }
 
     private func resetPerAccountState() {
@@ -431,6 +466,11 @@ final class UsageViewModel {
         let userInfo = try userInfoRes.get()
         let summary = try? summaryRes.get()
         let usage = try? usageRes.get()
+
+        // The IDE credential can silently belong to a different account than
+        // the previous refresh (#54) — reset per-account state BEFORE applying
+        // the new account's data so no cross-account deltas or caches leak.
+        resetIfAccountSwitched(newEmail: userInfo.email)
 
         // Resolve per-seat limits for token-based enterprise plans (no `plan`
         // object). The monthly limit feeds the credit-style $used/$limit
@@ -809,6 +849,12 @@ final class UsageViewModel {
     }
 
     func logout() {
+        // Suppress the IDE source, or logout would silently resurrect on the
+        // next refresh (#54).
+        ideAuthSuppressed = true
+        UserDefaults.standard.set(true, for: .ideAuthSuppressed)
+        activeAuthSource = nil
+        lastAccountEmail = nil
         cachedCookieHeader = nil
         do {
             try KeychainStore.deleteCookieHeader()
@@ -994,6 +1040,9 @@ final class UsageViewModel {
         }
         if let val = defaults.object(for: .appStatusNotificationEnabled) as? Bool {
             appStatusNotificationEnabled = val
+        }
+        if let val = defaults.object(for: .ideAuthSuppressed) as? Bool {
+            ideAuthSuppressed = val
         }
         if let val = defaults.object(for: .jumpEffectEnabled) as? Bool {
             jumpEffectEnabled = val
@@ -1203,6 +1252,17 @@ final class UsageViewModel {
     /// auth guard without touching the Keychain.
     internal func testHook_setCookieHeader(_ header: String) {
         cachedCookieHeader = header
+    }
+
+    /// Test-only — seeds weekly data so account-switch reset is observable.
+    internal func testHook_seedWeeklyData(_ data: [DayUsage]) {
+        weeklyData = data
+    }
+
+    /// Test-only — cancels the auto-refresh loop that connectViaIDE/startSession
+    /// spins up, so tests can drive refresh() deterministically.
+    internal func stopAutoRefreshForTests() {
+        stopAutoRefresh()
     }
 
     /// Builds a `JumpEvent` from raw delta/limit. Pure function — exposed for testing.
