@@ -34,6 +34,16 @@ CursorMeter is a menu bar app that calls undocumented Cursor API endpoints using
 
 The login WebView is the only place CursorMeter loads third-party origins. Everything else (`/api/usage-summary`, `/api/usage`, `/api/auth/me`) talks directly to `cursor.com` over HTTPS using `URLSessionConfiguration.ephemeral`.
 
+## Cursor IDE Credential Reuse (#54)
+
+When a Cursor IDE installation is signed in on the same Mac, CursorMeter derives its session from the IDE instead of asking the user to log in again:
+
+- **What is read:** `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`, a single key — `cursorAuth/accessToken`.
+- **How:** a read-only SQLite connection (`SQLITE_OPEN_READONLY`, 250 ms busy timeout), opened and closed within each read. The IDE's store is never written or locked.
+- **What is never read:** `cursorAuth/refreshToken` or any other key. CursorMeter never performs token refresh itself — it only reuses the access token the IDE already maintains.
+- **Logging:** the synthesized session header is treated like every other credential — never logged (see LogRedactor policy).
+- **Threat model:** this is the user's own credential on the user's own machine, inside the same trust boundary as the Keychain-stored cookie CursorMeter already holds. No new secret class is introduced; the browser-login (WebView) path remains available and is used as fallback.
+
 ## WebView Whitelist Policy
 
 The login WebView (`LoginWindow.swift`) validates every navigation against a two-tier host whitelist. The same check runs in both `decidePolicyFor navigationAction` and `decidePolicyFor navigationResponse`. Both callbacks also enforce `scheme == "https"` — a redirect to plain HTTP (or to `file:`/`javascript:`/`data:`) is rejected even when the host is on the whitelist.
