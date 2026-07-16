@@ -15,6 +15,7 @@ final class SettingsViewController: NSViewController {
     private var intervalPopUp = NSPopUpButton()
     private var notificationToggle = NSButton()
     private var appStatusToggle = NSButton()
+    private var authSourceLabel = NSTextField(labelWithString: "")
     private var thresholdBox = NSView()
     private var warningValueLabel = NSTextField()
     private var warningSlider = NSSlider()
@@ -195,6 +196,15 @@ final class SettingsViewController: NSViewController {
 
         // Launch at login
         launchAtLoginToggle.state = SMAppService.mainApp.status == .enabled ? .on : .off
+
+        // Auth source (#54)
+        authSourceLabel.stringValue = {
+            switch viewModel.activeAuthSource {
+            case .cursorIDE:    return "Auth: Cursor IDE"
+            case .browserLogin: return "Auth: Browser login"
+            case nil:           return "Auth: —"
+            }
+        }()
 
         // Updates
         updateUpdatesUI()
@@ -456,7 +466,11 @@ final class SettingsViewController: NSViewController {
         authorRow.orientation = .horizontal
         authorRow.spacing = 2
 
-        let section = NSStackView(views: [row, authorRow])
+        // #54: which credential source authenticated the current session.
+        authSourceLabel.font = NSFont.systemFont(ofSize: 10)
+        authSourceLabel.textColor = .secondaryLabelColor
+
+        let section = NSStackView(views: [row, authSourceLabel, authorRow])
         section.orientation = .vertical
         section.alignment = .left
         section.spacing = 8

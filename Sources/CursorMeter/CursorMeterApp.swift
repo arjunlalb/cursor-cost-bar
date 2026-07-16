@@ -43,6 +43,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             await manager.notifyRefreshFailing()
         }
 
+        // #54: IDE credential source. Wired here (nil default in the view
+        // model) so the SPM test host can never read the real state.vscdb.
+        let authReader = CursorAppAuthReader()
+        viewModel.ideCredentialProvider = { authReader.read() }
+
         UNUserNotificationCenter.current().delegate = self
 
         setupStatusItem()
@@ -53,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         viewModel.checkExistingSession()
         observeStatusItem()
         observePopover()
+        observeSettings()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -259,6 +265,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
                 guard let self else { return }
                 self.updateStatusItem()
                 self.observeStatusItem()
+            }
+        }
+    }
+
+    // #54: the settings window is pull-based; this is its only push signal.
+    private func observeSettings() {
+        withObservationTracking {
+            _ = viewModel.activeAuthSource
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                (self.settingsWindow?.contentViewController as? SettingsViewController)?.updateUI()
+                self.observeSettings()
             }
         }
     }
