@@ -28,7 +28,7 @@ Unlike in-editor extensions, CursorMeter runs independently as a native macOS ap
 - Settings UI (refresh interval, notification thresholds, menu bar display format, jump-effect intensity, weekly-chart style)
 - Launch at login support
 - In-app update checker
-- In-app WebView login (Google, GitHub, Enterprise SSO)
+- **Zero-config login** — if the Cursor IDE is signed in on the same Mac, CursorMeter connects automatically (no separate login). Browser (WebView) login — Google, GitHub, Enterprise SSO — remains as fallback. Logging out also pauses the automatic IDE connection until you reconnect.
 - Auto-refresh at configurable intervals (1/2/5/15 min)
 - Keychain-based credential storage
 - Pure AppKit — light memory footprint (~13 MB idle, ~30 MB once the popover has been opened; macOS retains AppKit / popover state for instant re-opens). If you don't need the weekly chart and want the older ~15 MB footprint instead, [v0.2.1](https://github.com/WoojinAhn/CursorMeter/releases/tag/v0.2.1) is the previous stable release.
@@ -84,7 +84,6 @@ This app uses several of Cursor's **undocumented internal endpoints** (usage, au
 
 - [ ] Visual mode indicator on weekly chart bars ([#69](https://github.com/WoojinAhn/CursorMeter/issues/69))
 - [ ] Billing-cycle rollover marker on weekly chart ([#70](https://github.com/WoojinAhn/CursorMeter/issues/70))
-- [ ] Migrate auth from WebView cookie capture to API token paste ([#54](https://github.com/WoojinAhn/CursorMeter/issues/54))
 
 ## Contributing
 

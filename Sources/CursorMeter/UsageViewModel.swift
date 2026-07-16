@@ -7,6 +7,12 @@ enum AuthState {
     case loginRequired
 }
 
+/// Credential origin for the active session (#54).
+enum AuthSource: Sendable, Equatable {
+    case cursorIDE
+    case browserLogin
+}
+
 /// Centralized UserDefaults keys. Avoids the typo class of bug where a
 /// setter writes one literal and `loadSettings` reads a slightly different one.
 private enum SettingsKey: String {
@@ -23,6 +29,7 @@ private enum SettingsKey: String {
     case appStatusNotificationEnabled
     case lastNotifiedUpdateVersion
     case sessionExpiryHistory
+    case ideAuthSuppressed
     // Legacy keys consulted only by `loadSettings` migration block.
     case legacyShowMenuBarText = "showMenuBarText"
     case legacyShowMenuBarPercent = "showMenuBarPercent"
@@ -109,6 +116,13 @@ final class UsageViewModel {
     // MARK: - Auth & Data
 
     var authState: AuthState = .loggedOut
+    /// Which credential source authenticated the most recent successful
+    /// refresh (#54). nil while logged out. Read by the settings window.
+    var activeAuthSource: AuthSource?
+    /// True after an explicit Log Out — the IDE source stays disabled until
+    /// the user reconnects (Connect Cursor IDE / browser login), otherwise
+    /// logout would silently resurrect on the next refresh (#54).
+    private(set) var ideAuthSuppressed: Bool = false
     var usageData: UsageDisplayData?
     var errorMessage: String?
     var isLoading = false
@@ -230,6 +244,11 @@ final class UsageViewModel {
         await UpdateChecker.shared.check()
     }
 
+    /// IDE credential source (#54), nil by default so the SPM test host can
+    /// never read the developer's real state.vscdb; production wires the real
+    /// CursorAppAuthReader in CursorMeterApp (same pattern as the #83 seams).
+    @ObservationIgnored internal var ideCredentialProvider: (@Sendable () -> IDECredential?)?
+
     // Previous canonical values for delta tracking. Reset to nil when display mode changes
     // (e.g. plan migration) so we don't compare across incompatible units.
     private var previousPlanUsedCents: Int?
@@ -281,14 +300,30 @@ final class UsageViewModel {
             if let header = try KeychainStore.loadCookieHeader() {
                 cachedCookieHeader = header
                 startSession()
+                return
             }
         } catch {
             Log.error("Failed to load keychain: \(error)")
         }
+        // No captured cookie — the IDE source may still authenticate (#54).
+        if !ideAuthSuppressed, ideCredentialProvider != nil {
+            startSession()
+        }
+    }
+
+    /// Re-enables the IDE credential source after a logout and starts a
+    /// session; the chain resolves the actual credential on refresh (#54).
+    func connectViaIDE() {
+        ideAuthSuppressed = false
+        UserDefaults.standard.set(false, for: .ideAuthSuppressed)
+        startSession()
     }
 
     func onLoginSuccess(cookieHeader: String) {
         cachedCookieHeader = cookieHeader
+        // Explicit reconnect intent — re-enable the IDE source too (#54).
+        ideAuthSuppressed = false
+        UserDefaults.standard.set(false, for: .ideAuthSuppressed)
         // The previous session's per-account caches must not leak into the
         // new account — a user signing in to a different team would
         // otherwise see the prior team's weekly data, baselines, and
@@ -301,6 +336,28 @@ final class UsageViewModel {
             Log.error("Failed to save cookie: \(error)")
         }
         startSession()
+    }
+
+    /// Identity of the account behind the last successful refresh (#54).
+    @ObservationIgnored private var lastAccountEmail: String?
+
+    /// Returns true when a switch was detected — callers must then discard
+    /// any in-flight work that captured the previous account's cached ids.
+    @discardableResult
+    private func resetIfAccountSwitched(newEmail: String?) -> Bool {
+        guard let newEmail else { return false }
+        defer { lastAccountEmail = newEmail }
+        guard let previous = lastAccountEmail, previous != newEmail else { return false }
+        Log.error("Account switched — resetting per-account state (#54)")
+        resetPerAccountState()
+        notificationManager.resetNotifications()
+        previousPlanUsedCents = nil
+        previousRequestsUsed = nil
+        previousServerPercent = nil
+        previousOnDemandUsedCents = nil
+        previousMode = nil
+        lastJump = nil
+        return true
     }
 
     private func resetPerAccountState() {
@@ -328,233 +385,295 @@ final class UsageViewModel {
 
     func refresh() async {
         guard !isRefreshing else { return }
-        guard let cookieHeader = cachedCookieHeader else {
-            authState = .loginRequired
-            return
-        }
-
         isRefreshing = true
         isLoading = true
         errorMessage = nil
+        defer {
+            isLoading = false
+            isRefreshing = false
+        }
 
-        do {
-            let apiClient = self.apiClient
-            // `async let` (not unstructured `Task {}`) keeps the three calls
-            // tied to refresh()'s cancellation lifecycle; `capture` turns each
-            // outcome into a Result so the expiry check below can inspect ALL
-            // failures before any single error aborts the refresh.
-            async let summaryCapture = Self.capture { try await apiClient.fetchUsageSummary(cookieHeader: cookieHeader) }
-            async let usageCapture = Self.capture { try await apiClient.fetchUsage(cookieHeader: cookieHeader) }
-            async let userInfoCapture = Self.capture { try await apiClient.fetchUserInfo(cookieHeader: cookieHeader) }
-
-            // Optimistic weekly fetch — runs in parallel with the primary batch
-            // once we have a cached teamId + email from a prior refresh. Saves
-            // one round-trip on every subsequent enterprise refresh. First
-            // refresh after login falls back to the sequential path inside
-            // `refreshWeeklyChart`.
-            let optimisticWeekly: Task<[DayUsage], Error>? =
-                makeOptimisticWeeklyTask(cookieHeader: cookieHeader)
-
-            // Optimistic hard-limit fetch — same prior-refresh teamId gating as
-            // the weekly task. Runs in parallel once a teamId is cached.
-            let optimisticHardLimit: Task<HardLimitResponse?, Never>? =
-                makeOptimisticHardLimitTask(cookieHeader: cookieHeader)
-
-            let userInfoRes = await userInfoCapture
-            let summaryRes = await summaryCapture
-            let usageRes = await usageCapture
-
-            // Expiry check runs over ALL results before any decode failure can
-            // abort the refresh — the 2026-07-03 incident: /api/auth/me decode
-            // error masked usage-summary's 401 and the logout path never fired.
-            if Self.hasUnauthorized([userInfoRes.failure, summaryRes.failure, usageRes.failure]) {
-                throw APIError.unauthorized
-            }
-
-            let userInfo = try userInfoRes.get()
-            let summary = try? summaryRes.get()
-            let usage = try? usageRes.get()
-
-            // Resolve per-seat limits for token-based enterprise plans (no `plan`
-            // object). The monthly limit feeds the credit-style $used/$limit
-            // display; the on-demand limit feeds the PERSONAL on-demand row
-            // (replacing the misleading team-wide figure). Monthly limit uses the
-            // optimistic hard-limit task (parallel); the on-demand limit is cached
-            // for the session since team-spend is a heavier roster fetch. First
-            // refresh resolves both synchronously so values appear immediately.
-            var perUserMonthlyLimitDollars =
-                (await optimisticHardLimit?.value ?? nil)?.perUserMonthlyLimitDollars
-            var perUserOnDemandLimitDollars = cachedOnDemandLimitDollars
-            let isTokenBased = summary.map {
-                $0.individualUsage?.plan == nil && $0.individualUsage?.overall != nil
-            } ?? false
-            if isTokenBased,
-               perUserMonthlyLimitDollars == nil || perUserOnDemandLimitDollars == nil,
-               let teamId = await resolveTeamId(cookieHeader: cookieHeader) {
-                if perUserMonthlyLimitDollars == nil {
-                    perUserMonthlyLimitDollars = (try? await apiClient
-                        .fetchHardLimit(cookieHeader: cookieHeader, teamId: teamId))?
-                        .perUserMonthlyLimitDollars
-                }
-                if perUserOnDemandLimitDollars == nil,
-                   let member = await fetchMyTeamMember(
-                       cookieHeader: cookieHeader, teamId: teamId, email: userInfo.email) {
-                    if cachedUserId == nil { cachedUserId = member.userId }
-                    perUserOnDemandLimitDollars = member.hardLimitOverrideDollars
-                    cachedOnDemandLimitDollars = perUserOnDemandLimitDollars
-                }
-            }
-
-            let baseData: UsageDisplayData?
-            if let summary {
-                baseData = UsageDisplayData.from(
-                    summary: summary, usage: usage, userInfo: userInfo,
-                    perUserMonthlyLimitDollars: perUserMonthlyLimitDollars,
-                    perUserOnDemandLimitDollars: perUserOnDemandLimitDollars)
-            } else if let usage {
-                baseData = UsageDisplayData.from(usage: usage, userInfo: userInfo)
-            } else {
-                throw APIError.httpError(statusCode: 0)
-            }
-
-            if let base = baseData {
-                // Rollover detection must precede the latch update: otherwise the
-                // first refresh of a new cycle paints stale `isOnDemandActive = true`
-                // from the previous cycle's latch, and only unlatches on the *next*
-                // refresh (1-refresh display lag).
-                if let newStart = base.cycleStartDate, newStart != previousCycleStart {
-                    if previousCycleStart != nil {
-                        notificationManager.resetNotifications()
-                        isOnDemandLatched = false
-                        Log.info("Billing cycle rollover — reset notification dedup + on-demand latch")
-                    }
-                    previousCycleStart = newStart
-                }
-
-                // Latch update: once activated, stays active until cycle rollover
-                // (handled in the rollover block above) or logout (resetPerAccountState).
-                if !isOnDemandLatched && base.wouldActivateOnDemand {
-                    isOnDemandLatched = true
-                    notificationManager.resetNotifications()
-                    Log.info("On-demand mode latched ON — threshold notifications reset")
-                }
-                usageData = base.withOnDemandActive(isOnDemandLatched)
-            }
-            Log.info("Usage data refreshed")
-            lastSuccessAt = Date()
-            consecutiveFailureCount = 0
-            networkRetryTask?.cancel()
-            networkRetryTask = nil
-
-            // Periodic update re-check rides the refresh cycle (success path
-            // only, so an offline stretch can't hammer GitHub) instead of
-            // owning a timer — at most one API call per updateRecheckInterval.
-            if Self.shouldRecheckUpdate(lastCheck: lastUpdateCheckAt, now: Date()) {
-                lastUpdateCheckAt = Date()
-                Task {
-                    let result = await updateCheckRunner()
-                    await recordUpdateCheckResult(result, source: .automatic)
-                }
-            }
-
-            // Compute jump delta against previous canonical value (skip on first refresh,
-            // mode change, or non-positive delta).
-            if let data = usageData {
-                updateJumpState(from: data)
-            }
-
-            // Weekly chart: consume the optimistic task if we had one, otherwise
-            // fall through to the sequential path that resolves teamId first.
-            if let task = optimisticWeekly {
-                await applyOptimisticWeekly(task)
-            } else if let data = usageData {
-                await refreshWeeklyChart(cookieHeader: cookieHeader, data: data, userInfo: userInfo)
-            }
-
-            // Check notification thresholds
-            if let data = usageData {
-                let mode: NotificationMode = {
-                    if data.isOnDemandActive {
-                        return .onDemand(
-                            usedCents: data.onDemandUsedCents ?? 0,
-                            limitCents: data.onDemandLimitCents ?? 0)
-                    }
-                    if data.isCreditBased {
-                        return .creditPlan(
-                            usedCents: data.planUsedCents ?? 0,
-                            limitCents: data.planLimitCents ?? 0)
-                    }
-                    return .requestQuota(used: data.requestsUsed, limit: data.requestsLimit)
-                }()
-                await notificationManager.checkAndNotify(
-                    percentUsed: data.percentUsed,
-                    warningThreshold: warningThreshold,
-                    criticalThreshold: criticalThreshold,
-                    enabled: notificationEnabled,
-                    mode: mode
-                )
-            }
-        } catch APIError.unauthorized {
-            // Error level (not info): unified logging evicts info entries within
-            // hours, and expiry timestamps must survive for interval analysis (#84).
-            Log.error("Session expired, clearing keychain")
-            let wasLoggedIn = (authState == .loggedIn)
-            cachedCookieHeader = nil
+        // Chain step 1: IDE credential (#54). Read off-main — the reader's
+        // SQLite busy_timeout can block up to 250ms.
+        if let provider = ideCredentialProvider, !ideAuthSuppressed,
+           let ide = await Task.detached(operation: { provider() }).value {
             do {
-                try keychainDeleteHandler()
+                try await runRefreshAttempt(cookieHeader: ide.cookieHeader)
+                authState = .loggedIn
+                activeAuthSource = .cursorIDE
+                return
+            } catch APIError.unauthorized {
+                // Fall through to the captured cookie. The IDE credential is
+                // unrelated to it — never clear keychain or notify here.
+                Log.error("IDE credential rejected (401) — falling back to captured cookie")
             } catch {
-                Log.error("Keychain delete failed: \(error.localizedDescription)")
+                await handleRefreshError(error)
+                return
             }
-            authState = .loginRequired
-            usageData = nil
-            // Expired session has its own dedicated UI; stale must not leak
-            // into the next login.
-            consecutiveFailureCount = 0
-            // stopAutoRefresh() cancels the auto-refresh task this code may be
-            // running inside — notify FIRST so the notification awaits don't run
-            // in a cancelled task. Re-entrance meanwhile is blocked by isRefreshing.
-            // Notify only on the loggedIn → loginRequired transition so a
-            // manual refresh in the expired state can't re-fire the banner.
-            if wasLoggedIn {
-                recordSessionExpiry(at: Date())
-                if let sessionExpiredNotifier {
-                    await sessionExpiredNotifier()
-                } else {
-                    await notificationManager.notifySessionExpired()
+        }
+
+        // Chain step 2: captured cookie (pre-#54 behavior).
+        guard let cookieHeader = cachedCookieHeader else {
+            // Chain exhausted. "Session expired" (.loginRequired) is reserved
+            // for sessions that actually worked before — the optimistic
+            // startSession() makes this guard reachable on a first-ever
+            // launch, which should read "Not connected" (.loggedOut). An
+            // already-expired state must persist, not downgrade.
+            if authState != .loginRequired {
+                authState = activeAuthSource == nil ? .loggedOut : .loginRequired
+            }
+            activeAuthSource = nil
+            return
+        }
+        do {
+            try await runRefreshAttempt(cookieHeader: cookieHeader)
+            authState = .loggedIn
+            activeAuthSource = .browserLogin
+        } catch APIError.unauthorized {
+            activeAuthSource = nil
+            await handleCapturedCookieExpiry()
+        } catch {
+            await handleRefreshError(error)
+        }
+    }
+
+    /// One credential's full refresh batch (#54): fetch, decode, apply state,
+    /// and success-path side effects. Throws instead of handling errors so the
+    /// credential chain in refresh() can decide fallback vs terminal handling.
+    private func runRefreshAttempt(cookieHeader: String) async throws {
+        let apiClient = self.apiClient
+        // `async let` (not unstructured `Task {}`) keeps the three calls
+        // tied to refresh()'s cancellation lifecycle; `capture` turns each
+        // outcome into a Result so the expiry check below can inspect ALL
+        // failures before any single error aborts the refresh.
+        async let summaryCapture = Self.capture { try await apiClient.fetchUsageSummary(cookieHeader: cookieHeader) }
+        async let usageCapture = Self.capture { try await apiClient.fetchUsage(cookieHeader: cookieHeader) }
+        async let userInfoCapture = Self.capture { try await apiClient.fetchUserInfo(cookieHeader: cookieHeader) }
+
+        // Optimistic weekly fetch — runs in parallel with the primary batch
+        // once we have a cached teamId + email from a prior refresh. Saves
+        // one round-trip on every subsequent enterprise refresh. First
+        // refresh after login falls back to the sequential path inside
+        // `refreshWeeklyChart`.
+        let optimisticWeekly: Task<[DayUsage], Error>? =
+            makeOptimisticWeeklyTask(cookieHeader: cookieHeader)
+
+        // Optimistic hard-limit fetch — same prior-refresh teamId gating as
+        // the weekly task. Runs in parallel once a teamId is cached.
+        let optimisticHardLimit: Task<HardLimitResponse?, Never>? =
+            makeOptimisticHardLimitTask(cookieHeader: cookieHeader)
+
+        let userInfoRes = await userInfoCapture
+        let summaryRes = await summaryCapture
+        let usageRes = await usageCapture
+
+        // Expiry check runs over ALL results before any decode failure can
+        // abort the refresh — the 2026-07-03 incident: /api/auth/me decode
+        // error masked usage-summary's 401 and the logout path never fired.
+        if Self.hasUnauthorized([userInfoRes.failure, summaryRes.failure, usageRes.failure]) {
+            throw APIError.unauthorized
+        }
+
+        let userInfo = try userInfoRes.get()
+        let summary = try? summaryRes.get()
+        let usage = try? usageRes.get()
+
+        // The IDE credential can silently belong to a different account than
+        // the previous refresh (#54) — reset per-account state BEFORE applying
+        // the new account's data so no cross-account deltas or caches leak.
+        // The optimistic tasks above captured the OLD account's cached
+        // team/user ids before this check could run — on a switch their
+        // results must be discarded, not merely the caches reset.
+        let accountSwitched = resetIfAccountSwitched(newEmail: userInfo.email)
+        if accountSwitched {
+            optimisticWeekly?.cancel()
+        }
+
+        // Resolve per-seat limits for token-based enterprise plans (no `plan`
+        // object). The monthly limit feeds the credit-style $used/$limit
+        // display; the on-demand limit feeds the PERSONAL on-demand row
+        // (replacing the misleading team-wide figure). Monthly limit uses the
+        // optimistic hard-limit task (parallel); the on-demand limit is cached
+        // for the session since team-spend is a heavier roster fetch. First
+        // refresh resolves both synchronously so values appear immediately.
+        var perUserMonthlyLimitDollars = accountSwitched
+            ? nil
+            : (await optimisticHardLimit?.value ?? nil)?.perUserMonthlyLimitDollars
+        var perUserOnDemandLimitDollars = cachedOnDemandLimitDollars
+        let isTokenBased = summary.map {
+            $0.individualUsage?.plan == nil && $0.individualUsage?.overall != nil
+        } ?? false
+        if isTokenBased,
+           perUserMonthlyLimitDollars == nil || perUserOnDemandLimitDollars == nil,
+           let teamId = await resolveTeamId(cookieHeader: cookieHeader) {
+            if perUserMonthlyLimitDollars == nil {
+                perUserMonthlyLimitDollars = (try? await apiClient
+                    .fetchHardLimit(cookieHeader: cookieHeader, teamId: teamId))?
+                    .perUserMonthlyLimitDollars
+            }
+            if perUserOnDemandLimitDollars == nil,
+               let member = await fetchMyTeamMember(
+                   cookieHeader: cookieHeader, teamId: teamId, email: userInfo.email) {
+                if cachedUserId == nil { cachedUserId = member.userId }
+                perUserOnDemandLimitDollars = member.hardLimitOverrideDollars
+                cachedOnDemandLimitDollars = perUserOnDemandLimitDollars
+            }
+        }
+
+        let baseData: UsageDisplayData?
+        if let summary {
+            baseData = UsageDisplayData.from(
+                summary: summary, usage: usage, userInfo: userInfo,
+                perUserMonthlyLimitDollars: perUserMonthlyLimitDollars,
+                perUserOnDemandLimitDollars: perUserOnDemandLimitDollars)
+        } else if let usage {
+            baseData = UsageDisplayData.from(usage: usage, userInfo: userInfo)
+        } else {
+            throw APIError.httpError(statusCode: 0)
+        }
+
+        if let base = baseData {
+            // Rollover detection must precede the latch update: otherwise the
+            // first refresh of a new cycle paints stale `isOnDemandActive = true`
+            // from the previous cycle's latch, and only unlatches on the *next*
+            // refresh (1-refresh display lag).
+            if let newStart = base.cycleStartDate, newStart != previousCycleStart {
+                if previousCycleStart != nil {
+                    notificationManager.resetNotifications()
+                    isOnDemandLatched = false
+                    Log.info("Billing cycle rollover — reset notification dedup + on-demand latch")
                 }
+                previousCycleStart = newStart
             }
-            stopAutoRefresh()
-        } catch APIError.forbidden {
+
+            // Latch update: once activated, stays active until cycle rollover
+            // (handled in the rollover block above) or logout (resetPerAccountState).
+            if !isOnDemandLatched && base.wouldActivateOnDemand {
+                isOnDemandLatched = true
+                notificationManager.resetNotifications()
+                Log.info("On-demand mode latched ON — threshold notifications reset")
+            }
+            usageData = base.withOnDemandActive(isOnDemandLatched)
+        }
+        Log.info("Usage data refreshed")
+        lastSuccessAt = Date()
+        consecutiveFailureCount = 0
+        networkRetryTask?.cancel()
+        networkRetryTask = nil
+
+        // Periodic update re-check rides the refresh cycle (success path
+        // only, so an offline stretch can't hammer GitHub) instead of
+        // owning a timer — at most one API call per updateRecheckInterval.
+        if Self.shouldRecheckUpdate(lastCheck: lastUpdateCheckAt, now: Date()) {
+            lastUpdateCheckAt = Date()
+            Task {
+                let result = await updateCheckRunner()
+                await recordUpdateCheckResult(result, source: .automatic)
+            }
+        }
+
+        // Compute jump delta against previous canonical value (skip on first refresh,
+        // mode change, or non-positive delta).
+        if let data = usageData {
+            updateJumpState(from: data)
+        }
+
+        // Weekly chart: consume the optimistic task if we had one, otherwise
+        // fall through to the sequential path that resolves teamId first.
+        if let task = optimisticWeekly, !accountSwitched {
+            await applyOptimisticWeekly(task)
+        } else if let data = usageData {
+            await refreshWeeklyChart(cookieHeader: cookieHeader, data: data, userInfo: userInfo)
+        }
+
+        // Check notification thresholds
+        if let data = usageData {
+            let mode: NotificationMode = {
+                if data.isOnDemandActive {
+                    return .onDemand(
+                        usedCents: data.onDemandUsedCents ?? 0,
+                        limitCents: data.onDemandLimitCents ?? 0)
+                }
+                if data.isCreditBased {
+                    return .creditPlan(
+                        usedCents: data.planUsedCents ?? 0,
+                        limitCents: data.planLimitCents ?? 0)
+                }
+                return .requestQuota(used: data.requestsUsed, limit: data.requestsLimit)
+            }()
+            await notificationManager.checkAndNotify(
+                percentUsed: data.percentUsed,
+                warningThreshold: warningThreshold,
+                criticalThreshold: criticalThreshold,
+                enabled: notificationEnabled,
+                mode: mode
+            )
+        }
+    }
+
+    /// Terminal expiry handling for the captured-cookie credential (#76/#84).
+    private func handleCapturedCookieExpiry() async {
+        // Error level (not info): unified logging evicts info entries within
+        // hours, and expiry timestamps must survive for interval analysis (#84).
+        Log.error("Session expired, clearing keychain")
+        let wasLoggedIn = (authState == .loggedIn)
+        cachedCookieHeader = nil
+        do {
+            try keychainDeleteHandler()
+        } catch {
+            Log.error("Keychain delete failed: \(error.localizedDescription)")
+        }
+        authState = .loginRequired
+        usageData = nil
+        // Expired session has its own dedicated UI; stale must not leak
+        // into the next login.
+        consecutiveFailureCount = 0
+        // stopAutoRefresh() cancels the auto-refresh task this code may be
+        // running inside — notify FIRST so the notification awaits don't run
+        // in a cancelled task. Re-entrance meanwhile is blocked by isRefreshing.
+        // Notify only on the loggedIn → loginRequired transition so a
+        // manual refresh in the expired state can't re-fire the banner.
+        if wasLoggedIn {
+            recordSessionExpiry(at: Date())
+            if let sessionExpiredNotifier {
+                await sessionExpiredNotifier()
+            } else {
+                await notificationManager.notifySessionExpired()
+            }
+        }
+        stopAutoRefresh()
+    }
+
+    /// Non-auth refresh failures: forbidden and network/decoding errors.
+    private func handleRefreshError(_ error: Error) async {
+        if case APIError.forbidden = error {
             errorMessage = "Access denied (subscription may be inactive)"
             consecutiveFailureCount += 1
             await maybeNotifyRefreshFailing()
             Log.error("API returned 403 Forbidden")
-        } catch {
-            consecutiveFailureCount += 1
-            await maybeNotifyRefreshFailing()
-            if usageData == nil {
-                // URLSession failures are wrapped as `APIError.networkError(URLError)`
-                // by the API client, so direct cast misses offline cases. Unwrap both
-                // layers before deciding whether to schedule a background retry.
-                let urlError: URLError? = {
-                    if let direct = error as? URLError { return direct }
-                    if case APIError.networkError(let underlying) = error {
-                        return underlying as? URLError
-                    }
-                    return nil
-                }()
-                if urlError?.code == .notConnectedToInternet || urlError?.code == .networkConnectionLost {
-                    errorMessage = "Waiting for network..."
-                    scheduleNetworkRetry()
-                } else {
-                    errorMessage = Self.fallbackErrorMessage(for: error)
-                }
-            }
-            Log.error("Refresh failed: \(error.localizedDescription)")
+            return
         }
-
-        isLoading = false
-        isRefreshing = false
+        consecutiveFailureCount += 1
+        await maybeNotifyRefreshFailing()
+        if usageData == nil {
+            // URLSession failures are wrapped as `APIError.networkError(URLError)`
+            // by the API client, so direct cast misses offline cases. Unwrap both
+            // layers before deciding whether to schedule a background retry.
+            let urlError: URLError? = {
+                if let direct = error as? URLError { return direct }
+                if case APIError.networkError(let underlying) = error {
+                    return underlying as? URLError
+                }
+                return nil
+            }()
+            if urlError?.code == .notConnectedToInternet || urlError?.code == .networkConnectionLost {
+                errorMessage = "Waiting for network..."
+                scheduleNetworkRetry()
+            } else {
+                errorMessage = Self.fallbackErrorMessage(for: error)
+            }
+        }
+        Log.error("Refresh failed: \(error.localizedDescription)")
     }
 
     // MARK: - Weekly chart refresh
@@ -748,6 +867,12 @@ final class UsageViewModel {
     }
 
     func logout() {
+        // Suppress the IDE source, or logout would silently resurrect on the
+        // next refresh (#54).
+        ideAuthSuppressed = true
+        UserDefaults.standard.set(true, for: .ideAuthSuppressed)
+        activeAuthSource = nil
+        lastAccountEmail = nil
         cachedCookieHeader = nil
         do {
             try KeychainStore.deleteCookieHeader()
@@ -933,6 +1058,9 @@ final class UsageViewModel {
         }
         if let val = defaults.object(for: .appStatusNotificationEnabled) as? Bool {
             appStatusNotificationEnabled = val
+        }
+        if let val = defaults.object(for: .ideAuthSuppressed) as? Bool {
+            ideAuthSuppressed = val
         }
         if let val = defaults.object(for: .jumpEffectEnabled) as? Bool {
             jumpEffectEnabled = val
@@ -1142,6 +1270,17 @@ final class UsageViewModel {
     /// auth guard without touching the Keychain.
     internal func testHook_setCookieHeader(_ header: String) {
         cachedCookieHeader = header
+    }
+
+    /// Test-only — seeds weekly data so account-switch reset is observable.
+    internal func testHook_seedWeeklyData(_ data: [DayUsage]) {
+        weeklyData = data
+    }
+
+    /// Test-only — cancels the auto-refresh loop that connectViaIDE/startSession
+    /// spins up, so tests can drive refresh() deterministically.
+    internal func stopAutoRefreshForTests() {
+        stopAutoRefresh()
     }
 
     /// Builds a `JumpEvent` from raw delta/limit. Pure function — exposed for testing.

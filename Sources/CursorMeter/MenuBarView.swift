@@ -399,7 +399,7 @@ final class MenuBarPopoverViewController: NSViewController {
 
         switch viewModel.authState {
         case .loggedOut, .loginRequired:
-            title  = "Log In..."
+            title  = "Log in with Browser..."
             icon   = "person"
             action = { [weak self] in self?.onLogin() }
         case .loggedIn:
@@ -537,7 +537,8 @@ final class MenuBarPopoverViewController: NSViewController {
         statusStack.alignment = .leading
         statusStack.spacing   = 2
 
-        if viewModel.authState == .loginRequired {
+        if viewModel.authState == .loginRequired
+            || (viewModel.authState == .loggedOut && !viewModel.isLoading && viewModel.errorMessage == nil) {
             applyLoginRequiredStatus()
             return
         }
@@ -552,41 +553,49 @@ final class MenuBarPopoverViewController: NSViewController {
             label.stringValue = "Error: \(error)"
             label.textColor   = NSColor.systemRed
             label.font        = NSFont.systemFont(ofSize: 11)
-        } else {
-            label.stringValue = "Not logged in"
-            label.textColor   = NSColor.secondaryLabelColor
         }
 
         statusStack.addArrangedSubview(label)
     }
 
-    /// Expired-session state: explanation + prominent login action instead of
-    /// the bare "Not logged in" label, so the user learns *why* data is gone
-    /// and how to recover without hunting for the small auth row (#76).
+    /// Logged-out / expired state: IDE-first guidance (#54) with the browser
+    /// login as the secondary path (#76 kept the prominent recovery layout).
     private func applyLoginRequiredStatus() {
         statusStack.orientation = .vertical
         statusStack.alignment   = .centerX
         statusStack.spacing     = 6
 
-        let title = NSTextField(labelWithString: "⚠️ Session expired")
+        let title = NSTextField(labelWithString:
+            viewModel.authState == .loginRequired ? "⚠️ Session expired" : "Not connected")
         title.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
 
-        let body = NSTextField(wrappingLabelWithString: "Log in again to see your Cursor usage.")
+        let body = NSTextField(wrappingLabelWithString: "Sign in to the Cursor IDE to connect automatically.")
         body.font      = NSFont.systemFont(ofSize: 11)
         body.textColor = NSColor.secondaryLabelColor
         body.alignment = .center
         body.preferredMaxLayoutWidth = 220
 
-        let loginButton = NSButton(
-            title: "Log In",
+        let connectButton = NSButton(
+            title: "Connect Cursor IDE",
+            target: self,
+            action: #selector(connectIDETapped))
+        connectButton.bezelStyle    = .rounded
+        connectButton.keyEquivalent = "\r"
+
+        let browserButton = NSButton(
+            title: "Log in with Browser",
             target: self,
             action: #selector(loginRequiredLoginTapped))
-        loginButton.bezelStyle    = .rounded
-        loginButton.keyEquivalent = "\r"
+        browserButton.bezelStyle = .rounded
 
         statusStack.addArrangedSubview(title)
         statusStack.addArrangedSubview(body)
-        statusStack.addArrangedSubview(loginButton)
+        statusStack.addArrangedSubview(connectButton)
+        statusStack.addArrangedSubview(browserButton)
+    }
+
+    @objc private func connectIDETapped() {
+        viewModel.connectViaIDE()
     }
 
     @objc private func loginRequiredLoginTapped() {
