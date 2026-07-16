@@ -152,6 +152,8 @@ actor CursorAPIClient {
                         userInfo: [NSLocalizedDescriptionKey: "Invalid response"]))
         }
 
+        logSetCookieIfPresent(httpResponse)
+
         if httpResponse.statusCode == 401 {
             throw APIError.unauthorized
         }
@@ -172,5 +174,41 @@ actor CursorAPIClient {
         }
 
         return data
+    }
+
+    // MARK: - Set-Cookie rotation diagnostic (#84)
+
+    private var lastSetCookieLogAt: Date?
+
+    /// If the server tries to rotate the session cookie, that explains rapid
+    /// expiries: the app keeps sending its statically captured cookie and the
+    /// superseded token gets invalidated server-side. Error level so entries
+    /// survive log retention; throttled to once per hour to bound noise.
+    private func logSetCookieIfPresent(_ response: HTTPURLResponse) {
+        guard let summary = Self.setCookieSummary(fromHeaders: response.allHeaderFields) else { return }
+        let now = Date()
+        if let last = lastSetCookieLogAt, now.timeIntervalSince(last) < 3600 { return }
+        lastSetCookieLogAt = now
+        Log.error("API response carried Set-Cookie [names only: \(summary)] — possible session rotation (#84)")
+    }
+
+    /// Extracts only cookie NAMES from a Set-Cookie header — values are
+    /// session tokens and must never reach the log. Pure for testability.
+    /// URLSession comma-joins multiple Set-Cookie headers; a new cookie name
+    /// appears at string start or after ", ", followed by `=`. Attribute
+    /// pairs (`; Path=/`) and Expires dates (`, 15 Jul 2026`) don't match.
+    nonisolated static func setCookieSummary(fromHeaders headers: [AnyHashable: Any]) -> String? {
+        guard let raw = headers["Set-Cookie"] as? String, !raw.isEmpty else { return nil }
+        let pattern = #"(?:^|, )([A-Za-z0-9_\-\.]+)="#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(raw.startIndex..., in: raw)
+        var names: [String] = []
+        for match in regex.matches(in: raw, range: range) {
+            if let r = Range(match.range(at: 1), in: raw) {
+                let name = String(raw[r])
+                if !names.contains(name) { names.append(name) }
+            }
+        }
+        return names.isEmpty ? nil : names.joined(separator: ",")
     }
 }

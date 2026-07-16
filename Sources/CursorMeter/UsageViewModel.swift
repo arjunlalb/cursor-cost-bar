@@ -22,6 +22,7 @@ private enum SettingsKey: String {
     case weeklyChartStyle
     case appStatusNotificationEnabled
     case lastNotifiedUpdateVersion
+    case sessionExpiryHistory
     // Legacy keys consulted only by `loadSettings` migration block.
     case legacyShowMenuBarText = "showMenuBarText"
     case legacyShowMenuBarPercent = "showMenuBarPercent"
@@ -134,6 +135,18 @@ final class UsageViewModel {
     /// so failures 6, 7, … don't re-fire; a success resets the counter and re-arms.
     nonisolated static func shouldNotifyRefreshFailing(failureCount: Int, enabled: Bool) -> Bool {
         enabled && failureCount == staleThreshold
+    }
+
+    /// Session-expiry audit history cap (#84): ~50 entries covers a year of
+    /// even weekly expiries while bounding the UserDefaults payload.
+    nonisolated static let expiryHistoryCap = 50
+
+    nonisolated static func cappedExpiryHistory(_ history: [Date], appending date: Date) -> [Date] {
+        var result = history + [date]
+        if result.count > expiryHistoryCap {
+            result.removeFirst(result.count - expiryHistoryCap)
+        }
+        return result
     }
     /// Outcome of the most recent update check (nil = never checked this session).
     /// Settings UI consults this to distinguish "up to date" from "check failed";
@@ -482,7 +495,9 @@ final class UsageViewModel {
                 )
             }
         } catch APIError.unauthorized {
-            Log.info("Session expired, clearing keychain")
+            // Error level (not info): unified logging evicts info entries within
+            // hours, and expiry timestamps must survive for interval analysis (#84).
+            Log.error("Session expired, clearing keychain")
             let wasLoggedIn = (authState == .loggedIn)
             cachedCookieHeader = nil
             do {
@@ -501,6 +516,7 @@ final class UsageViewModel {
             // Notify only on the loggedIn → loginRequired transition so a
             // manual refresh in the expired state can't re-fire the banner.
             if wasLoggedIn {
+                recordSessionExpiry(at: Date())
                 if let sessionExpiredNotifier {
                     await sessionExpiredNotifier()
                 } else {
@@ -860,6 +876,18 @@ final class UsageViewModel {
         // so overlapping check paths can't double-fire.
         defaults.set(release.version, for: .lastNotifiedUpdateVersion)
         await updateAvailableNotifier(release.version, release.htmlURL)
+    }
+
+    /// Appends an expiry detection timestamp to the audited UserDefaults
+    /// history (#84) so "is the cookie expiring faster?" is answerable weeks
+    /// later, independent of unified-log retention. Read via:
+    /// `defaults read com.woojin.CursorMeter sessionExpiryHistory`.
+    private func recordSessionExpiry(at date: Date) {
+        let defaults = UserDefaults.standard
+        let history = (defaults.object(for: .sessionExpiryHistory) as? [Date]) ?? []
+        let updated = Self.cappedExpiryHistory(history, appending: date)
+        defaults.set(updated, for: .sessionExpiryHistory)
+        Log.error("Session expiry recorded (#84) — total \(updated.count) entries")
     }
 
     /// Fires the refresh-failing notification on the 4→5 transition only.
