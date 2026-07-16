@@ -7,6 +7,12 @@ enum AuthState {
     case loginRequired
 }
 
+/// Credential origin for the active session (#54).
+enum AuthSource: Sendable, Equatable {
+    case cursorIDE
+    case browserLogin
+}
+
 /// Centralized UserDefaults keys. Avoids the typo class of bug where a
 /// setter writes one literal and `loadSettings` reads a slightly different one.
 private enum SettingsKey: String {
@@ -109,6 +115,13 @@ final class UsageViewModel {
     // MARK: - Auth & Data
 
     var authState: AuthState = .loggedOut
+    /// Which credential source authenticated the most recent successful
+    /// refresh (#54). nil while logged out. Read by the settings window.
+    var activeAuthSource: AuthSource?
+    /// True after an explicit Log Out — the IDE source stays disabled until
+    /// the user reconnects (Connect Cursor IDE / browser login), otherwise
+    /// logout would silently resurrect on the next refresh (#54).
+    private(set) var ideAuthSuppressed: Bool = false
     var usageData: UsageDisplayData?
     var errorMessage: String?
     var isLoading = false
@@ -230,6 +243,11 @@ final class UsageViewModel {
         await UpdateChecker.shared.check()
     }
 
+    /// IDE credential source (#54), nil by default so the SPM test host can
+    /// never read the developer's real state.vscdb; production wires the real
+    /// CursorAppAuthReader in CursorMeterApp (same pattern as the #83 seams).
+    @ObservationIgnored internal var ideCredentialProvider: (@Sendable () -> IDECredential?)?
+
     // Previous canonical values for delta tracking. Reset to nil when display mode changes
     // (e.g. plan migration) so we don't compare across incompatible units.
     private var previousPlanUsedCents: Int?
@@ -328,22 +346,49 @@ final class UsageViewModel {
 
     func refresh() async {
         guard !isRefreshing else { return }
-        guard let cookieHeader = cachedCookieHeader else {
-            authState = .loginRequired
-            return
-        }
         isRefreshing = true
         isLoading = true
         errorMessage = nil
+        defer {
+            isLoading = false
+            isRefreshing = false
+        }
+
+        // Chain step 1: IDE credential (#54). Read off-main — the reader's
+        // SQLite busy_timeout can block up to 250ms.
+        if let provider = ideCredentialProvider, !ideAuthSuppressed,
+           let ide = await Task.detached(operation: { provider() }).value {
+            do {
+                try await runRefreshAttempt(cookieHeader: ide.cookieHeader)
+                authState = .loggedIn
+                activeAuthSource = .cursorIDE
+                return
+            } catch APIError.unauthorized {
+                // Fall through to the captured cookie. The IDE credential is
+                // unrelated to it — never clear keychain or notify here.
+                Log.error("IDE credential rejected (401) — falling back to captured cookie")
+            } catch {
+                await handleRefreshError(error)
+                return
+            }
+        }
+
+        // Chain step 2: captured cookie (pre-#54 behavior).
+        guard let cookieHeader = cachedCookieHeader else {
+            authState = .loginRequired
+            activeAuthSource = nil
+            return
+        }
         do {
             try await runRefreshAttempt(cookieHeader: cookieHeader)
+            authState = .loggedIn
+            activeAuthSource = .browserLogin
         } catch APIError.unauthorized {
+            activeAuthSource = nil
             await handleCapturedCookieExpiry()
         } catch {
             await handleRefreshError(error)
         }
-        isLoading = false
-        isRefreshing = false
     }
 
     /// One credential's full refresh batch (#54): fetch, decode, apply state,
