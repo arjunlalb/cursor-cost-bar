@@ -1,6 +1,6 @@
 # Credential Chain: Cursor IDE Token (Primary) + WebView Capture (Fallback) — Design
 
-**Date:** 2026-07-16
+**Date:** 2026-07-16 (rev 2, 2026-07-17, after Codex review)
 **Issue:** #54
 **Status:** Approved design, pending implementation plan
 
@@ -59,6 +59,11 @@ struct CursorAppAuthReader: Sendable {
 
 - Opens the DB **read-only** (`SQLITE_OPEN_READONLY`, `busy_timeout` 250ms) —
   never blocks or mutates the IDE's store. Any SQLite error → nil (fallback).
+- Concurrency (rev 2): no stored `sqlite3*` handle — open, query, finalize,
+  close within a single `read()` call; no state shared across tasks, so plain
+  `Sendable` holds without `@unchecked`. Because busy_timeout can block up to
+  250ms, `refresh()` invokes it OFF the MainActor:
+  `await Task.detached { reader.read() }.value`.
 - `SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'`.
 - Pure helpers, each unit-tested without I/O:
   - `parseJWTClaims(_ jwt: String) -> (sub: String, exp: Date)?` —
@@ -75,10 +80,20 @@ struct CursorAppAuthReader: Sendable {
 
 Per refresh, resolve in order:
 
-1. **IDE token** — `authReader.read()`; if non-nil, use it.
+1. **IDE token** — `ideCredentialProvider()`; if non-nil (and not suppressed,
+   see Logout below), use it.
 2. **Captured cookie** — existing `cachedCookieHeader` (memory, backed by
    Keychain at launch via `checkExistingSession`).
 3. Neither → `authState = .loginRequired` (no API call attempted).
+
+**Attempt boundary (rev 2):** `refresh()` keeps sole ownership of
+`isRefreshing`; the per-credential work moves into a non-recursive private
+`runRefreshAttempt(cookieHeader:) async throws` helper. The outer `refresh()`
+runs the IDE attempt, and on `APIError.unauthorized` runs the captured-cookie
+attempt at most once — no recursive `refresh()` call (which the `isRefreshing`
+guard would swallow). A failed attempt's concurrent endpoint tasks are already
+collapsed into the thrown error by the existing batch logic; the fallback
+attempt starts a fresh batch.
 
 **401/unauthorized fallthrough (one refresh cycle):**
 
@@ -94,9 +109,40 @@ Per refresh, resolve in order:
 - `authState == .loggedIn` whenever either source yields a usable credential —
   a user with a signed-in IDE never sees the login window.
 
-Seam: `@ObservationIgnored internal var ideCredentialProvider: () -> IDECredential?`
-defaulting to the real reader — tests inject fixtures and never touch the real
-`state.vscdb` (extends the CLAUDE.md seam rules).
+Seam (rev 2 — strengthened): `@ObservationIgnored internal var
+ideCredentialProvider: (@Sendable () -> IDECredential?)? = nil`. The default
+is **nil**; production wires the real reader in
+`CursorMeterApp.applicationDidFinishLaunching` (before
+`checkExistingSession()`), exactly like the #83 notifier seams. Every bare
+`UsageViewModel()` in the test host therefore has NO IDE source — no test can
+accidentally read the developer's real `state.vscdb`, with zero per-suite
+injection burden.
+
+### 2b. Logout semantics (rev 2)
+
+With an IDE-primary chain, a naive "Log Out" would resurrect on the next
+refresh. Redefined:
+
+- **Log Out** = existing behavior (clear captured cookie + keychain + state)
+  **plus** persist `ideAuthSuppressed = true` (new UserDefaults key). While
+  suppressed, chain step 1 is skipped → the app is genuinely logged out.
+- Logged-out popover buttons: primary `"Connect Cursor IDE"` (sets
+  `ideAuthSuppressed = false`, triggers a refresh; if the IDE has no token the
+  status line explains the fallback), secondary `"Log in with Browser"`
+  (existing WebView flow; a successful browser login also clears the
+  suppression flag — explicit user intent to reconnect).
+- Fresh installs: flag defaults to false → zero-config onboarding preserved.
+
+### 2c. Account-switch reset (rev 2)
+
+The IDE credential can silently belong to a different account than the
+captured cookie (or the IDE user can switch accounts between refreshes).
+`resetPerAccountState()` currently runs only on browser login. New rule: track
+the account identity of each successful refresh — `email` from
+`/api/auth/me` (already fetched every cycle). When it differs from the
+previous refresh's identity, run the full per-account reset (caches, weekly
+data, notification dedup set, on-demand latch, jump baselines) BEFORE applying
+the new data, so no cross-account deltas or stale team caches leak.
 
 ### 3. UX changes
 
@@ -108,9 +154,13 @@ defaulting to the real reader — tests inject fixtures and never touch the real
   area: `Auth: Cursor IDE` / `Auth: Browser login` / `Auth: —` (logged out).
   Driven by a new observable `var activeAuthSource: AuthSource?`
   (`enum AuthSource { case cursorIDE, browserLogin }`) set during refresh.
-  This is new UI-read observable state → **must be added to the
-  `withObservationTracking` blocks** consulted by the settings updateUI path
-  (per CLAUDE.md observation rule; verify which block during implementation).
+  Rev 2: no settings observation path exists today (settings `updateUI()` is
+  pull-based) — add a dedicated `withObservationTracking` block in
+  `CursorMeterApp` tracking `viewModel.activeAuthSource` (and re-arming, per
+  the standard pattern) whose onChange calls
+  `(settingsWindow?.contentViewController as? SettingsViewController)?.updateUI()`.
+  `SettingsViewController.updateUI()` reads the property directly (nil-safe
+  when the window is closed).
 - Session-expired notification (#76) and #84 timestamp recording now fire only
   on all-sources-exhausted unauthorized — for IDE users this becomes rare by
   design.
@@ -137,6 +187,11 @@ now: no real `state.vscdb`):
 2. **Pure helpers**: `parseJWTClaims`, `userID(fromSub:)`, `makeCookieHeader`
    boundary cases.
 3. **Chain integration** (MockURLProtocol + injected `ideCredentialProvider`):
+   - Logout while IDE source active → stays logged out across a subsequent
+     refresh (suppression flag honored); "Connect Cursor IDE" path re-enables.
+   - Account switch (auth/me email changes between refreshes) → per-account
+     state reset (weekly cache cleared, jump baseline nil, notification dedup
+     reset) before the new account's data lands.
    - IDE credential present + API 200 → data refreshed, `activeAuthSource == .cursorIDE`, no keychain read needed.
    - IDE 401 + captured cookie 200 → fallback works within one refresh, `activeAuthSource == .browserLogin`, captured cookie NOT deleted, no expiry notification.
    - IDE 401 + captured 401 → single #76 expiry flow (keychain delete, one notification, one #84 record).
@@ -158,11 +213,8 @@ now: no real `state.vscdb`):
 ## Workflow Notes
 
 - Issue #54 retitled to match this scope.
-- Test-host default for the reader seam must be nil-safe: `UsageViewModel()`
-  is constructed bare in several suites; the default provider must not read
-  the real `state.vscdb` during tests. Resolution: the DEFAULT stays real (production
-  correctness), but `read()` on a foreign machine's real DB in CI simply
-  returns data or nil harmlessly — it performs no writes and no network. Local
-  dev machines have a real signed-in DB, which would flip `activeAuthSource`
-  in unrelated tests; therefore test helpers that construct `UsageViewModel`
-  must inject `{ nil }` (add to the standard seam checklist in CLAUDE.md).
+- Rev 2: the reader seam defaults to **nil** and production wires it in
+  `CursorMeterApp` (see §2) — this supersedes the rev-1 note about test
+  helpers injecting nil; bare `UsageViewModel()` constructions are safe by
+  construction. Add the new UserDefaults keys (`ideAuthSuppressed`) to
+  `SettingsKey` and load/persist via the existing pattern.
