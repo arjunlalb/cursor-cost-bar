@@ -341,10 +341,13 @@ final class UsageViewModel {
     /// Identity of the account behind the last successful refresh (#54).
     @ObservationIgnored private var lastAccountEmail: String?
 
-    private func resetIfAccountSwitched(newEmail: String?) {
-        guard let newEmail else { return }
+    /// Returns true when a switch was detected — callers must then discard
+    /// any in-flight work that captured the previous account's cached ids.
+    @discardableResult
+    private func resetIfAccountSwitched(newEmail: String?) -> Bool {
+        guard let newEmail else { return false }
         defer { lastAccountEmail = newEmail }
-        guard let previous = lastAccountEmail, previous != newEmail else { return }
+        guard let previous = lastAccountEmail, previous != newEmail else { return false }
         Log.error("Account switched — resetting per-account state (#54)")
         resetPerAccountState()
         notificationManager.resetNotifications()
@@ -354,6 +357,7 @@ final class UsageViewModel {
         previousOnDemandUsedCents = nil
         previousMode = nil
         lastJump = nil
+        return true
     }
 
     private func resetPerAccountState() {
@@ -410,7 +414,14 @@ final class UsageViewModel {
 
         // Chain step 2: captured cookie (pre-#54 behavior).
         guard let cookieHeader = cachedCookieHeader else {
-            authState = .loginRequired
+            // Chain exhausted. "Session expired" (.loginRequired) is reserved
+            // for sessions that actually worked before — the optimistic
+            // startSession() makes this guard reachable on a first-ever
+            // launch, which should read "Not connected" (.loggedOut). An
+            // already-expired state must persist, not downgrade.
+            if authState != .loginRequired {
+                authState = activeAuthSource == nil ? .loggedOut : .loginRequired
+            }
             activeAuthSource = nil
             return
         }
@@ -470,7 +481,13 @@ final class UsageViewModel {
         // The IDE credential can silently belong to a different account than
         // the previous refresh (#54) — reset per-account state BEFORE applying
         // the new account's data so no cross-account deltas or caches leak.
-        resetIfAccountSwitched(newEmail: userInfo.email)
+        // The optimistic tasks above captured the OLD account's cached
+        // team/user ids before this check could run — on a switch their
+        // results must be discarded, not merely the caches reset.
+        let accountSwitched = resetIfAccountSwitched(newEmail: userInfo.email)
+        if accountSwitched {
+            optimisticWeekly?.cancel()
+        }
 
         // Resolve per-seat limits for token-based enterprise plans (no `plan`
         // object). The monthly limit feeds the credit-style $used/$limit
@@ -479,8 +496,9 @@ final class UsageViewModel {
         // optimistic hard-limit task (parallel); the on-demand limit is cached
         // for the session since team-spend is a heavier roster fetch. First
         // refresh resolves both synchronously so values appear immediately.
-        var perUserMonthlyLimitDollars =
-            (await optimisticHardLimit?.value ?? nil)?.perUserMonthlyLimitDollars
+        var perUserMonthlyLimitDollars = accountSwitched
+            ? nil
+            : (await optimisticHardLimit?.value ?? nil)?.perUserMonthlyLimitDollars
         var perUserOnDemandLimitDollars = cachedOnDemandLimitDollars
         let isTokenBased = summary.map {
             $0.individualUsage?.plan == nil && $0.individualUsage?.overall != nil
@@ -562,7 +580,7 @@ final class UsageViewModel {
 
         // Weekly chart: consume the optimistic task if we had one, otherwise
         // fall through to the sequential path that resolves teamId first.
-        if let task = optimisticWeekly {
+        if let task = optimisticWeekly, !accountSwitched {
             await applyOptimisticWeekly(task)
         } else if let data = usageData {
             await refreshWeeklyChart(cookieHeader: cookieHeader, data: data, userInfo: userInfo)

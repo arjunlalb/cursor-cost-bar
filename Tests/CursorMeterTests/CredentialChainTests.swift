@@ -101,7 +101,7 @@ final class CredentialChainTests: XCTestCase {
 
         await vm.refresh()
 
-        XCTAssertEqual(vm.authState, .loginRequired)
+        XCTAssertEqual(vm.authState, .loggedOut, "never authenticated — Not connected, not Session expired")
         XCTAssertNil(vm.activeAuthSource)
         XCTAssertTrue(box.all.isEmpty, "no API call without any credential")
     }
@@ -179,7 +179,7 @@ final class CredentialChainTests: XCTestCase {
 
         let callsBefore = box.all.count
         await vm.refresh()
-        XCTAssertEqual(vm.authState, .loginRequired, "suppressed IDE + no cookie = logged out")
+        XCTAssertEqual(vm.authState, .loggedOut, "suppressed IDE + no cookie + no prior session = Not connected")
         XCTAssertEqual(box.all.count, callsBefore, "no API call while suppressed")
     }
 
