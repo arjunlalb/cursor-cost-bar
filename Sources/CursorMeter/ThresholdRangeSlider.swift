@@ -81,6 +81,9 @@ final class ThresholdRangeSlider: NSView {
 
         let wx = thumbCenterX(warningValue)
         let cx = thumbCenterX(criticalValue)
+        // Clip zone fills to the rounded track — restore state so the rest
+        // of draw() (thumbs, bubbles, ticks, legend) is not clipped with it.
+        NSGraphicsContext.saveGraphicsState()
         NSBezierPath(roundedRect: t, xRadius: 2.5, yRadius: 2.5).setClip()
         func fill(_ from: CGFloat, _ to: CGFloat, _ color: NSColor) {
             color.setFill()
@@ -89,6 +92,7 @@ final class ThresholdRangeSlider: NSView {
         fill(t.minX, wx, CircularProgressIcon.accentColor.withAlphaComponent(0.4))
         fill(wx, cx, CircularProgressIcon.warnColor.withAlphaComponent(0.45))
         fill(cx, t.maxX, CircularProgressIcon.critColor.withAlphaComponent(0.45))
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     private func drawThumb(at value: Int, color: NSColor) {
