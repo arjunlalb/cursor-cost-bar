@@ -22,7 +22,7 @@ thresholds mean. Vertical footprint ~92pt → ~76pt (incl. ticks + legend).
 | Thumb constraint | no crossing, minimum gap 5% → `W ∈ [0, C−5]`, `C ∈ [W+5, 100]` | issue #81 |
 | Persistence | `warningThreshold` / `criticalThreshold` keys unchanged; `NotificationManager.evaluateThreshold` untouched | issue #81 |
 | Thumbs | colored pills 14×24pt r7 (warning = `warnColor`, critical = `critColor`), not white circles | mockup, codex review |
-| Ticks + legend | tick labels 0/25/50/75/100 under the track; legend row (정상 / Warning / Critical swatches) below — both inside the control; intrinsic height ~76pt | mockup, codex review |
+| Ticks + legend | tick labels 0/25/50/75/100 under the track; legend row (Normal / Warning / Critical swatches, English — app UI language) below — both inside the control; intrinsic height ~76pt | mockup, codex review |
 | onChange timing | fires live during drag (matches current continuous NSSlider behavior); programmatic `setValues` never fires it | codex review |
 | Normalization | `setValues` clamps **both** values: `W ∈ [0, 95]` first, then `C ∈ [W+5, 100]` — impossible to exceed 100. Display-side only; never writes back to the view model | codex review |
 | Tie-break | mousedown at equal distance from both thumbs grabs **warning**; otherwise nearest | codex review |
@@ -49,8 +49,8 @@ var onChange: ((_ warning: Int, _ critical: Int) -> Void)?
   thumb ±5%, ⇧←/⇧→ nudges the critical thumb.
 - VoiceOver: two `NSAccessibilityElement` children, each with slider role,
   label ("Warning threshold" / "Critical threshold"), current value, min/max,
-  a screen-coordinate `accessibilityFrame` kept in sync on layout and value
-  change, and `accessibilityPerformIncrement/Decrement`. Value changes post
+  a frame kept in sync on layout and value change via
+  `setAccessibilityFrameInParentSpace` (AppKit derives the screen frame), and `accessibilityPerformIncrement/Decrement`. Value changes post
   `.valueChanged` notifications.
 - Drawing: all in `draw(_:)` (no layer-backed color caching, so appearance
   changes re-resolve dynamic colors): gray base track, three zone fills,
