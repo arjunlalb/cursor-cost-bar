@@ -30,6 +30,7 @@ open /Applications/CursorMeter.app    # 5. Launch
 
 - `log` is a zsh builtin — use `/usr/bin/log` to invoke macOS unified logging
 - `Log.info` entries require `--info --debug` flags: `/usr/bin/log show --predicate 'subsystem == "com.cursormeter"' --info --debug --last 5m`
+- **Always add `AND process == "CursorMeter"` to the predicate** — `swift test` runs log under the same subsystem from the xctest host, and mixed output has caused misdiagnosis (phantom session-expiry events)
 - Simulate session expiry: `security add-generic-password -U -s com.cursormeter.session -a cursor-cookie-header -w "WorkosCursorSessionToken=INVALID"` → relaunch
 
 ## Issue Workflow
