@@ -17,10 +17,7 @@ final class SettingsViewController: NSViewController {
     private var appStatusToggle = NSButton()
     private var authSourceLabel = NSTextField(labelWithString: "")
     private var thresholdBox = NSView()
-    private var warningValueLabel = NSTextField()
-    private var warningSlider = NSSlider()
-    private var criticalValueLabel = NSTextField()
-    private var criticalSlider = NSSlider()
+    private var thresholdSlider = ThresholdRangeSlider()
     private var menuBarDisplayPopUp = NSPopUpButton()
     private var jumpEffectToggle = NSButton()
     private var jumpIntensitySegmented = NSSegmentedControl()
@@ -94,10 +91,8 @@ final class SettingsViewController: NSViewController {
         NSLayoutConstraint.activate([
             thresholdBox.leadingAnchor.constraint(equalTo: outerStack.leadingAnchor),
             thresholdBox.trailingAnchor.constraint(equalTo: outerStack.trailingAnchor),
-            warningSlider.leadingAnchor.constraint(equalTo: outerStack.leadingAnchor),
-            warningSlider.trailingAnchor.constraint(equalTo: outerStack.trailingAnchor),
-            criticalSlider.leadingAnchor.constraint(equalTo: outerStack.leadingAnchor),
-            criticalSlider.trailingAnchor.constraint(equalTo: outerStack.trailingAnchor),
+            thresholdSlider.leadingAnchor.constraint(equalTo: outerStack.leadingAnchor),
+            thresholdSlider.trailingAnchor.constraint(equalTo: outerStack.trailingAnchor),
         ])
 
         outerStack.addArrangedSubview(makeSeparator())
@@ -160,17 +155,12 @@ final class SettingsViewController: NSViewController {
         thresholdBox.isHidden = !viewModel.notificationEnabled
         appStatusToggle.state = viewModel.appStatusNotificationEnabled ? .on : .off
 
-        // Warning slider
-        let warning = viewModel.warningThreshold
-        warningSlider.integerValue = warning
-        warningValueLabel.stringValue = "\(warning)%"
-
-        // Critical slider - min must be warning+5
-        let criticalMin = min(warning + 5, 100)
-        criticalSlider.minValue = Double(criticalMin)
-        let critical = max(viewModel.criticalThreshold, criticalMin)
-        criticalSlider.integerValue = critical
-        criticalValueLabel.stringValue = "\(critical)%"
+        // Threshold range slider — setValues normalizes corrupted pairs
+        // (gap + bounds), so no cross-slider juggling is needed here.
+        thresholdSlider.setValues(
+            warning: viewModel.warningThreshold,
+            critical: viewModel.criticalThreshold
+        )
 
         // Menu bar display mode
         let percentOnly = viewModel.usageData?.isPercentOnly == true
@@ -238,24 +228,14 @@ final class SettingsViewController: NSViewController {
         )
 
         // Threshold controls (shown when notifications enabled)
-        let warningGrid = makeThresholdGrid(
-            label: "Warning",
-            valueField: &warningValueLabel
-        )
-        warningSlider = makeSlider(min: 50, max: 90, action: #selector(warningSliderChanged))
+        thresholdSlider = ThresholdRangeSlider()
+        thresholdSlider.translatesAutoresizingMaskIntoConstraints = false
+        thresholdSlider.onChange = { [weak self] warning, critical in
+            self?.viewModel.setWarningThreshold(warning)
+            self?.viewModel.setCriticalThreshold(critical)
+        }
 
-        let criticalGrid = makeThresholdGrid(
-            label: "Critical",
-            valueField: &criticalValueLabel
-        )
-        criticalSlider = makeSlider(min: 55, max: 100, action: #selector(criticalSliderChanged))
-
-        let thresholdStack = NSStackView(views: [
-            warningGrid,
-            warningSlider,
-            criticalGrid,
-            criticalSlider,
-        ])
+        let thresholdStack = NSStackView(views: [thresholdSlider])
         thresholdStack.orientation = .vertical
         thresholdStack.alignment = .left
         thresholdStack.spacing = 4
@@ -502,26 +482,6 @@ final class SettingsViewController: NSViewController {
         viewModel.setAppStatusNotificationEnabled(appStatusToggle.state == .on)
     }
 
-    @objc private func warningSliderChanged() {
-        let stepped = roundToStep(warningSlider.doubleValue, step: 5)
-        warningSlider.integerValue = Int(stepped)
-        viewModel.setWarningThreshold(Int(stepped))
-
-        // Auto-adjust critical if needed
-        let minCritical = Int(stepped) + 5
-        if viewModel.criticalThreshold < minCritical {
-            viewModel.setCriticalThreshold(minCritical)
-        }
-        updateUI()
-    }
-
-    @objc private func criticalSliderChanged() {
-        let stepped = roundToStep(criticalSlider.doubleValue, step: 5)
-        criticalSlider.integerValue = Int(stepped)
-        viewModel.setCriticalThreshold(Int(stepped))
-        criticalValueLabel.stringValue = "\(Int(stepped))%"
-    }
-
     @objc private func menuBarDisplayModeChanged() {
         viewModel.setMenuBarDisplayMode(menuBarDisplayPopUp.indexOfSelectedItem)
     }
@@ -625,28 +585,6 @@ final class SettingsViewController: NSViewController {
         return button
     }
 
-    private func makeSlider(min: Double, max: Double, action: Selector) -> NSSlider {
-        let slider = NSSlider(value: min, minValue: min, maxValue: max, target: self, action: action)
-        slider.isContinuous = false
-        slider.numberOfTickMarks = Int((max - min) / 5) + 1
-        slider.allowsTickMarkValuesOnly = true
-        slider.translatesAutoresizingMaskIntoConstraints = false
-        return slider
-    }
-
-    private func makeThresholdGrid(label: String, valueField: inout NSTextField) -> NSView {
-        let labelField = makeLabel(label)
-        let valueDisplay = NSTextField(labelWithString: "--%")
-        valueDisplay.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
-        valueDisplay.alignment = .right
-        valueField = valueDisplay
-
-        let row = NSStackView(views: [labelField, makeSpacer(), valueDisplay])
-        row.orientation = .horizontal
-        row.spacing = 4
-        return row
-    }
-
     private func makeSpacer() -> NSView {
         let v = NSView()
         v.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -693,9 +631,4 @@ final class SettingsViewController: NSViewController {
         }
     }
 
-    // MARK: - Helpers: Math
-
-    private func roundToStep(_ value: Double, step: Double) -> Double {
-        (value / step).rounded() * step
-    }
 }
