@@ -107,6 +107,9 @@ final class MenuBarPopoverViewController: NSViewController {
 
     // MARK: - Public API
 
+    /// Test seam (#87): width the popover content demands from AutoLayout.
+    func testHook_contentFittingWidth() -> CGFloat { rootStack.fittingSize.width }
+
     /// Called by the owner whenever viewModel state changes.
     func updateUI() {
         if let data = viewModel.usageData {
@@ -358,6 +361,14 @@ final class MenuBarPopoverViewController: NSViewController {
         staleLabel.font      = NSFont.systemFont(ofSize: 11)
         staleLabel.textColor = CircularProgressIcon.warnColor
         staleLabel.isHidden  = true
+        // #87: the message can exceed the 240pt inner width. Its width demand
+        // must stay below fittingSize priority (50) so the text truncates
+        // instead of inflating the content view past the popover window frame.
+        staleLabel.lineBreakMode = .byTruncatingTail
+        staleLabel.setContentCompressionResistancePriority(
+            .init(NSLayoutConstraint.Priority.fittingSizeCompression.rawValue - 1),
+            for: .horizontal
+        )
         dataStack.addArrangedSubview(staleLabel)
 
         // Make all rows in dataStack fill full width
