@@ -190,6 +190,7 @@ final class ThresholdRangeSlider: NSView {
     // MARK: - Mouse
 
     override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)   // route subsequent arrow keys here
         let x = convert(event.locationInWindow, from: nil).x
         let p = Self.snappedPercent(forX: x, trackMinX: trackRect.minX, trackWidth: trackRect.width)
         activeThumb = Self.nearestThumb(toPercent: p, warning: warningValue, critical: criticalValue)
@@ -236,12 +237,16 @@ final class ThresholdRangeSlider: NSView {
         nudge(event.modifierFlags.contains(.shift) ? .critical : .warning, by: delta)
     }
 
-    private func nudge(_ thumb: Thumb, by delta: Int) {
+    /// Returns true when the value actually changed (false at a boundary).
+    @discardableResult
+    private func nudge(_ thumb: Thumb, by delta: Int) -> Bool {
         let previous = activeThumb
+        defer { activeThumb = previous }
         activeThumb = thumb
+        let before = (warningValue, criticalValue)
         let raw = (thumb == .warning ? warningValue : criticalValue) + delta
         applyDrag(toPercent: raw)
-        activeThumb = previous
+        return (warningValue, criticalValue) != before
     }
 
     // MARK: - Accessibility (one virtual slider element per thumb)
@@ -276,7 +281,7 @@ final class ThresholdRangeSlider: NSView {
         thumb == .warning ? warningValue : criticalValue
     }
 
-    fileprivate func axNudge(_ thumb: Thumb, by delta: Int) {
+    fileprivate func axNudge(_ thumb: Thumb, by delta: Int) -> Bool {
         nudge(thumb, by: delta)
     }
 
@@ -311,10 +316,17 @@ private final class ThumbAXElement: NSAccessibilityElement {
     weak var owner: ThresholdRangeSlider?
     var thumb: ThresholdRangeSlider.Thumb = .warning
 
+    // Numeric value + percent valueDescription — matches native NSSlider's
+    // AX typing (numeric value, human string separate).
     override func accessibilityValue() -> Any? {
         let owner = self.owner, thumb = self.thumb
-        let value: String? = MainActor.assumeIsolated { owner.map { "\($0.axValue(for: thumb))%" } }
+        let value: Int? = MainActor.assumeIsolated { owner?.axValue(for: thumb) }
         return value
+    }
+
+    override func accessibilityValueDescription() -> String? {
+        let owner = self.owner, thumb = self.thumb
+        return MainActor.assumeIsolated { owner.map { "\($0.axValue(for: thumb))%" } }
     }
 
     override func accessibilityMinValue() -> Any? { 0 }
@@ -322,13 +334,11 @@ private final class ThumbAXElement: NSAccessibilityElement {
 
     override func accessibilityPerformIncrement() -> Bool {
         let owner = self.owner, thumb = self.thumb
-        MainActor.assumeIsolated { owner?.axNudge(thumb, by: ThresholdRangeSlider.step) }
-        return true
+        return MainActor.assumeIsolated { owner?.axNudge(thumb, by: ThresholdRangeSlider.step) ?? false }
     }
 
     override func accessibilityPerformDecrement() -> Bool {
         let owner = self.owner, thumb = self.thumb
-        MainActor.assumeIsolated { owner?.axNudge(thumb, by: -ThresholdRangeSlider.step) }
-        return true
+        return MainActor.assumeIsolated { owner?.axNudge(thumb, by: -ThresholdRangeSlider.step) ?? false }
     }
 }
