@@ -30,6 +30,7 @@ private enum SettingsKey: String {
     case lastNotifiedUpdateVersion
     case sessionExpiryHistory
     case ideAuthSuppressed
+    case browserLoginEnabled
     // Legacy keys consulted only by `loadSettings` migration block.
     case legacyShowMenuBarText = "showMenuBarText"
     case legacyShowMenuBarPercent = "showMenuBarPercent"
@@ -189,6 +190,14 @@ final class UsageViewModel {
     /// Unified toggle for app-status notifications (#83): new-release and
     /// refresh-failing. Independent of usage-threshold and jump settings.
     var appStatusNotificationEnabled: Bool = true
+    /// Browser login is deprecated (#90): hidden unless the user opts in.
+    /// The IDE-absent case auto-exposes it regardless (zero-path guard).
+    var browserLoginEnabled: Bool = false
+
+    /// Single source of truth for every browser-login surface (#90).
+    nonisolated static func shouldShowBrowserLogin(enabled: Bool, ideInstalled: Bool) -> Bool {
+        enabled || !ideInstalled
+    }
 
     // MARK: - Jump Effect
 
@@ -1025,6 +1034,11 @@ final class UsageViewModel {
         UserDefaults.standard.set(enabled, for: .notificationEnabled)
     }
 
+    func setBrowserLoginEnabled(_ enabled: Bool) {
+        browserLoginEnabled = enabled
+        UserDefaults.standard.set(enabled, for: .browserLoginEnabled)
+    }
+
     func setWarningThreshold(_ value: Int) {
         warningThreshold = value
         UserDefaults.standard.set(value, for: .warningThreshold)
@@ -1184,6 +1198,9 @@ final class UsageViewModel {
            let style = WeeklyChartStyle(rawValue: raw)
         {
             weeklyChartStyle = style
+        }
+        if let val = defaults.object(for: .browserLoginEnabled) as? Bool {
+            browserLoginEnabled = val
         }
     }
 

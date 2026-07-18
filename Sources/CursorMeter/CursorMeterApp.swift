@@ -338,8 +338,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         switch action {
         case .openLoginWindow:
             Task { @MainActor [weak self] in
+                guard let self else { return }
                 NSApp.activate(ignoringOtherApps: true)
-                self?.showLogin()
+                // #90: browser login is deprecated — with the opt-in off,
+                // route expiry recovery to the popover's IDE guidance instead.
+                if self.viewModel.browserLoginEnabled {
+                    self.showLogin()
+                } else {
+                    self.showPopover()
+                }
             }
         case .openReleaseURL(let url):
             Task { @MainActor in
@@ -373,6 +380,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             _ = viewModel.consecutiveFailureCount
             _ = viewModel.lastSuccessAt
             _ = viewModel.ideCredentialAvailable
+            _ = viewModel.browserLoginEnabled
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }

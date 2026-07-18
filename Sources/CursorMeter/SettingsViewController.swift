@@ -33,6 +33,7 @@ final class SettingsViewController: NSViewController {
     private var weeklyChartStyleSegmented = NSSegmentedControl()
     private var weeklyChartStyleRow = NSView()
     private var launchAtLoginToggle = NSButton()
+    private var browserLoginToggle = NSButton()
 
     // Updates row controls
     private var updateStatusLabel = NSTextField()
@@ -186,6 +187,9 @@ final class SettingsViewController: NSViewController {
 
         // Launch at login
         launchAtLoginToggle.state = SMAppService.mainApp.status == .enabled ? .on : .off
+
+        // Browser login opt-in (#90)
+        browserLoginToggle.state = viewModel.browserLoginEnabled ? .on : .off
 
         // Auth source (#54)
         authSourceLabel.stringValue = {
@@ -390,7 +394,23 @@ final class SettingsViewController: NSViewController {
             title: "Launch at login",
             action: #selector(launchAtLoginChanged)
         )
-        return launchAtLoginToggle
+
+        // #90: browser login is deprecated — opt-in only.
+        browserLoginToggle = makeCheckbox(
+            title: "Enable browser login",
+            action: #selector(browserLoginToggleChanged)
+        )
+        let deprecationCaption = makeLabel(
+            "Deprecated — Cursor IDE connection is the supported sign-in path.")
+        deprecationCaption.font = NSFont.systemFont(ofSize: 11)
+        deprecationCaption.textColor = .secondaryLabelColor
+
+        let stack = NSStackView(views: [launchAtLoginToggle, browserLoginToggle, deprecationCaption])
+        stack.orientation = .vertical
+        stack.alignment = .left
+        stack.spacing = 6
+        stack.setCustomSpacing(2, after: browserLoginToggle)
+        return stack
     }
 
     private func makeUpdatesSection() -> NSView {
@@ -518,6 +538,10 @@ final class SettingsViewController: NSViewController {
         let raw = weeklyChartStyleSegmented.selectedSegment
         guard let style = WeeklyChartStyle(rawValue: raw) else { return }
         viewModel.setWeeklyChartStyle(style)
+    }
+
+    @objc private func browserLoginToggleChanged() {
+        viewModel.setBrowserLoginEnabled(browserLoginToggle.state == .on)
     }
 
     @objc private func launchAtLoginChanged() {

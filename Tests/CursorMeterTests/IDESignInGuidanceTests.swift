@@ -319,3 +319,39 @@ final class IDESignInGuidanceTests: XCTestCase {
         XCTAssertEqual(vm.authState, .loggedIn, "restarted watch still connects")
     }
 }
+
+/// #90: browser-login deprecation — visibility rule + setting round-trip.
+@MainActor
+final class BrowserLoginDeprecationTests: XCTestCase {
+
+    // Clear on BOTH sides: a leaked true from a prior run would flip the
+    // defaults-off assertion before tearDown ever runs.
+    override func setUp() {
+        super.setUp()
+        UserDefaults.standard.removeObject(forKey: "browserLoginEnabled")
+    }
+
+    override func tearDown() {
+        UserDefaults.standard.removeObject(forKey: "browserLoginEnabled")
+        super.tearDown()
+    }
+
+    func test_shouldShowBrowserLogin_allCombinations() {
+        XCTAssertTrue(UsageViewModel.shouldShowBrowserLogin(enabled: true, ideInstalled: true))
+        XCTAssertTrue(UsageViewModel.shouldShowBrowserLogin(enabled: true, ideInstalled: false))
+        XCTAssertTrue(UsageViewModel.shouldShowBrowserLogin(enabled: false, ideInstalled: false),
+                      "IDE absent must auto-expose browser login (zero-path guard)")
+        XCTAssertFalse(UsageViewModel.shouldShowBrowserLogin(enabled: false, ideInstalled: true))
+    }
+
+    func test_browserLoginEnabled_defaultsOffAndRoundTrips() {
+        let vm1 = UsageViewModel(apiClient: CursorAPIClient(configuration: .ephemeral))
+        vm1.updateCheckRunner = { .upToDate }
+        XCTAssertFalse(vm1.browserLoginEnabled, "deprecated path must default off")
+
+        vm1.setBrowserLoginEnabled(true)
+        let vm2 = UsageViewModel(apiClient: CursorAPIClient(configuration: .ephemeral))
+        vm2.updateCheckRunner = { .upToDate }
+        XCTAssertTrue(vm2.browserLoginEnabled, "setting must persist across instances")
+    }
+}
