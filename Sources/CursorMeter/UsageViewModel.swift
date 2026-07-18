@@ -263,10 +263,17 @@ final class UsageViewModel {
     @ObservationIgnored internal var watchTickInterval: Duration = .seconds(3)
     @ObservationIgnored internal var watchTimeout: Duration = .seconds(60)
 
-    /// Monotonic token shared by availability reads and the watch: bumped on
-    /// every new probe, restart, and logout, so a stale off-main provider
-    /// result can neither overwrite a newer flag nor connect after logout.
+    /// Two separate monotonic tokens (codex review): sharing one would let a
+    /// routine availability probe (every login-layout render) invalidate an
+    /// active watch.
+    /// - `ideProbeGeneration` orders availability reads: a stale off-main
+    ///   result can never overwrite a newer flag.
+    /// - `ideWatchGeneration` scopes the watch and the pending launch
+    ///   completion: bumped on restart and logout, so a late launch success
+    ///   or provider read can neither start nor continue a watch the user
+    ///   has implicitly cancelled.
     @ObservationIgnored private var ideProbeGeneration = 0
+    @ObservationIgnored private var ideWatchGeneration = 0
     @ObservationIgnored private var availabilityCheckInFlight = false
     @ObservationIgnored private var ideSignInWatchTask: Task<Void, Never>?
 
@@ -297,9 +304,11 @@ final class UsageViewModel {
     /// sign-in watch (a failed launch must not leave a background poll).
     func openIDEAndWatch() {
         guard let launcher = ideAppLauncher else { return }
+        let generation = ideWatchGeneration
         launcher { [weak self] success in
-            guard success else { return }
-            self?.beginIDESignInWatch()
+            guard let self, success,
+                  generation == self.ideWatchGeneration else { return }
+            self.beginIDESignInWatch()
         }
     }
 
@@ -311,8 +320,8 @@ final class UsageViewModel {
     func beginIDESignInWatch() {
         ideSignInWatchTask?.cancel()
         guard let provider = ideCredentialProvider else { return }
-        ideProbeGeneration += 1
-        let generation = ideProbeGeneration
+        ideWatchGeneration += 1
+        let generation = ideWatchGeneration
         let interval = watchTickInterval
         let timeout = watchTimeout
         ideSignInWatchTask = Task { [weak self] in
@@ -321,7 +330,7 @@ final class UsageViewModel {
             while !Task.isCancelled, clock.now < deadline {
                 guard let self, self.authState != .loggedIn else { return }
                 let found = await Task.detached { provider() != nil }.value
-                guard !Task.isCancelled, generation == self.ideProbeGeneration else { return }
+                guard !Task.isCancelled, generation == self.ideWatchGeneration else { return }
                 if found, self.authState != .loggedIn, !self.isRefreshing {
                     self.connectViaIDE()
                 }
@@ -953,11 +962,13 @@ final class UsageViewModel {
     }
 
     func logout() {
-        // Stop the sign-in watch and invalidate any pending provider read —
-        // a late result must not reconnect against the user's intent (#88).
+        // Stop the sign-in watch and invalidate pending provider reads AND
+        // any in-flight launch completion — a late result must not reconnect
+        // against the user's intent (#88).
         ideSignInWatchTask?.cancel()
         ideSignInWatchTask = nil
         ideProbeGeneration += 1
+        ideWatchGeneration += 1
         // Suppress the IDE source, or logout would silently resurrect on the
         // next refresh (#54).
         ideAuthSuppressed = true

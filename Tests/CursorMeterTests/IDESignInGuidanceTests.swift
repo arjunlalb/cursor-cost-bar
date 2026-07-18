@@ -14,7 +14,7 @@ final class IDESignInGuidanceTests: XCTestCase {
     final class CredentialBox: @unchecked Sendable {
         private let lock = NSLock()
         private var credential: IDECredential?
-        private(set) var readCount = 0
+        private var readCount = 0
         private let gate = NSLock()
 
         /// Sync wrappers — NSLock.lock() is unavailable directly in async
@@ -25,6 +25,12 @@ final class IDESignInGuidanceTests: XCTestCase {
         func set(_ value: IDECredential?) {
             lock.lock(); defer { lock.unlock() }
             credential = value
+        }
+
+        /// Lock-protected snapshot — the provider writes from a detached task.
+        func readCountSnapshot() -> Int {
+            lock.lock(); defer { lock.unlock() }
+            return readCount
         }
 
         func read() -> IDECredential? {
@@ -184,7 +190,7 @@ final class IDESignInGuidanceTests: XCTestCase {
         vm.openIDEAndWatch()
         try? await Task.sleep(for: .milliseconds(150))
         XCTAssertEqual(vm.authState, .loggedOut, "failed launch must not start the watch")
-        XCTAssertEqual(box.readCount, 0)
+        XCTAssertEqual(box.readCountSnapshot(), 0)
     }
 
     func test_watch_signInDiscoveredMidPoll_autoConnects() async {
@@ -209,11 +215,12 @@ final class IDESignInGuidanceTests: XCTestCase {
         vm.ideAppLauncher = { completion in completion(true) }
 
         vm.openIDEAndWatch()
-        try? await Task.sleep(for: .milliseconds(500))  // past the 300ms timeout
+        await waitUntil { box.readCountSnapshot() > 0 }   // watch actually started
+        try? await Task.sleep(for: .milliseconds(500))    // past the 300ms timeout
         XCTAssertEqual(vm.authState, .loggedOut)
-        let countAtTimeout = box.readCount
-        try? await Task.sleep(for: .milliseconds(100))
-        XCTAssertEqual(box.readCount, countAtTimeout, "watch must stop polling after timeout")
+        let countAtTimeout = box.readCountSnapshot()
+        try? await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(box.readCountSnapshot(), countAtTimeout, "watch must stop polling after timeout")
     }
 
     func test_watch_stopsWhenLoggedInViaBrowser() async {
@@ -228,11 +235,11 @@ final class IDESignInGuidanceTests: XCTestCase {
 
         await waitUntil { vm.authState == .loggedIn }
         try? await Task.sleep(for: .milliseconds(80))   // let the watch observe loggedIn
-        let countAfterStop = box.readCount
+        let countAfterStop = box.readCountSnapshot()
         try? await Task.sleep(for: .milliseconds(100))
         // onLoginSuccess's own refresh may read the provider once; the watch
         // itself must stop ticking afterwards.
-        XCTAssertEqual(box.readCount, countAfterStop, "watch must stop once logged in")
+        XCTAssertEqual(box.readCountSnapshot(), countAfterStop, "watch must stop once logged in")
     }
 
     func test_logout_duringPendingWatchRead_doesNotConnect() async {
@@ -251,6 +258,48 @@ final class IDESignInGuidanceTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(150))
         XCTAssertEqual(vm.authState, .loggedOut, "late read after logout must not connect")
         XCTAssertTrue(vm.ideAuthSuppressed, "logout suppression must survive the pending read")
+    }
+
+    func test_availabilityProbeDuringWatch_doesNotKillWatch() async {
+        let box = CredentialBox()   // starts signed-out
+        let vm = makeViewModel(box: box)
+        MockURLProtocol.requestHandler = Self.successHandler
+        vm.ideAppLauncher = { completion in completion(true) }
+
+        vm.openIDEAndWatch()
+        // Popover re-renders re-probe availability mid-watch (e.g. the user
+        // reopens the popover to check progress) — the watch must survive.
+        for _ in 0..<3 {
+            try? await Task.sleep(for: .milliseconds(30))
+            vm.refreshIDEAvailability()
+        }
+        box.set(Self.testCredential)   // user finishes signing in
+
+        await waitUntil { vm.authState == .loggedIn }
+        XCTAssertEqual(vm.authState, .loggedIn, "availability probes must not cancel the watch")
+    }
+
+    func test_launchCompletionAfterLogout_doesNotStartWatch() async {
+        let box = CredentialBox()
+        box.set(Self.testCredential)
+        let vm = makeViewModel(box: box)
+        MockURLProtocol.requestHandler = Self.successHandler
+
+        // Launcher that lets the test deliver the completion late.
+        final class CompletionBox: @unchecked Sendable {
+            var stored: (@MainActor (Bool) -> Void)?
+        }
+        let pending = CompletionBox()
+        vm.ideAppLauncher = { completion in pending.stored = completion }
+
+        vm.openIDEAndWatch()               // launch in flight
+        vm.logout()                        // user logs out meanwhile
+        pending.stored?(true)              // launch success arrives late
+
+        try? await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(vm.authState, .loggedOut, "stale launch completion must not start the watch")
+        XCTAssertTrue(vm.ideAuthSuppressed)
+        XCTAssertEqual(box.readCountSnapshot(), 0)
     }
 
     func test_watchRestart_invalidatesPriorPendingRead() async {

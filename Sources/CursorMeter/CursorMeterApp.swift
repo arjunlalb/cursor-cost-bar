@@ -59,7 +59,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
                 at: appURL,
                 configuration: NSWorkspace.OpenConfiguration()
             ) { app, _ in
-                Task { @MainActor in completion(app != nil) }
+                // Hoist to Bool before crossing into the task — the callback's
+                // NSRunningApplication is not Sendable under strict checking.
+                let success = app != nil
+                Task { @MainActor in completion(success) }
             }
         }
 
