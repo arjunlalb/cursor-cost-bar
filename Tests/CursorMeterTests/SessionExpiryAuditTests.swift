@@ -6,7 +6,9 @@ import XCTest
 @MainActor
 final class SessionExpiryAuditTests: XCTestCase {
 
-    private static let historyKey = "sessionExpiryHistory"
+    // nonisolated: referenced from nonisolated setUp/tearDown overrides —
+    // CI's stricter isolation inference rejects the @MainActor-inferred default.
+    nonisolated private static let historyKey = "sessionExpiryHistory"
 
     override func setUp() {
         super.setUp()
