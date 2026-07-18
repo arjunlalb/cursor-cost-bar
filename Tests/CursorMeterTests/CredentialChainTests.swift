@@ -6,7 +6,7 @@ import XCTest
 @MainActor
 final class CredentialChainTests: XCTestCase {
 
-    private static let suppressedKey = "ideAuthSuppressed"
+    nonisolated private static let suppressedKey = "ideAuthSuppressed"
 
     override func setUp() {
         super.setUp()

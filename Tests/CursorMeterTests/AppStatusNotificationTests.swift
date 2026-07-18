@@ -6,8 +6,8 @@ import XCTest
 @MainActor
 final class AppStatusNotificationTests: XCTestCase {
 
-    private static let enabledKey = "appStatusNotificationEnabled"
-    private static let lastNotifiedKey = "lastNotifiedUpdateVersion"
+    nonisolated private static let enabledKey = "appStatusNotificationEnabled"
+    nonisolated private static let lastNotifiedKey = "lastNotifiedUpdateVersion"
 
     override func setUp() {
         super.setUp()
