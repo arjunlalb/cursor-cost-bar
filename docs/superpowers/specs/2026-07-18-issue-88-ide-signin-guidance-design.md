@@ -34,7 +34,7 @@ connect automatically.
   - Watch task handle stored `@ObservationIgnored`. Poll interval/timeout as internal `@ObservationIgnored` vars (tests shorten them; no injectable clock needed).
 - `MenuBarView.applyLoginRequiredStatus()`
   - Branches on `viewModel.ideCredentialAvailable` per the table; kicks `refreshIDEAvailability()` each render (fire-and-forget).
-  - [Open Cursor IDE] action: `viewModel.beginIDESignInWatch()` + launch the IDE app via NSWorkspace (launch failure → no-op; layout already offers the browser path).
+  - [Open Cursor IDE] action calls a single `viewModel.openIDEAndWatch()`: runs the launcher seam, and only its `true` completion starts `beginIDESignInWatch()` (launch failure → nothing starts; layout already offers the browser path).
 - IDE app launch/presence goes through seams (project convention, testable):
   - `ideAppPresenceCheck: () -> Bool` — production: `NSWorkspace.shared.urlForApplication(withBundleIdentifier:)` (verify the actual bundle id on-machine) with by-name fallback
   - `ideAppLauncher: (@escaping (Bool) -> Void) -> Void` — production: `NSWorkspace.openApplication` completion; watch starts only on `true`
