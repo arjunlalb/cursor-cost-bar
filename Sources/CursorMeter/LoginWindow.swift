@@ -114,13 +114,34 @@ final class LoginWindow: NSObject {
         self.webView = webView
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 640),
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 664),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false)
         window.isReleasedWhenClosed = false
         window.title = "Cursor Login"
-        window.contentView = webView
+
+        // #90: deprecation banner pinned above the web view.
+        let banner = NSTextField(wrappingLabelWithString:
+            "⚠️ Browser login is deprecated and may stop working in a future release. Prefer Cursor IDE connection.")
+        banner.font = NSFont.systemFont(ofSize: 11)
+        banner.textColor = .secondaryLabelColor
+        banner.translatesAutoresizingMaskIntoConstraints = false
+        webView.translatesAutoresizingMaskIntoConstraints = false
+
+        let container = NSView()
+        container.addSubview(banner)
+        container.addSubview(webView)
+        NSLayoutConstraint.activate([
+            banner.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
+            banner.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
+            banner.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
+            webView.topAnchor.constraint(equalTo: banner.bottomAnchor, constant: 6),
+            webView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            webView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        window.contentView = container
         window.center()
         window.delegate = self
         // MenuBarExtra apps use .accessory policy — temporarily switch to .regular

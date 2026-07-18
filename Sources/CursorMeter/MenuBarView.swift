@@ -410,7 +410,17 @@ final class MenuBarPopoverViewController: NSViewController {
 
         switch viewModel.authState {
         case .loggedOut, .loginRequired:
-            title  = "Log in with Browser..."
+            // #90: browser login is deprecated — the row shows only when
+            // opted in (or the IDE app is absent). The login layout above
+            // already carries the recovery hint when hidden.
+            let ideInstalled = viewModel.ideAppPresenceCheck?() ?? true
+            guard UsageViewModel.shouldShowBrowserLogin(
+                enabled: viewModel.browserLoginEnabled, ideInstalled: ideInstalled)
+            else {
+                authContainer.isHidden = true
+                return
+            }
+            title  = "Log in with Browser... (deprecated)"
             icon   = "person"
             action = { [weak self] in self?.onLogin() }
         case .loggedIn:
@@ -418,6 +428,7 @@ final class MenuBarPopoverViewController: NSViewController {
             icon   = "person.slash"
             action = { [weak self] in self?.viewModel.logout() }
         }
+        authContainer.isHidden = false
 
         let btn = makeMenuRowButton(title: title, symbolName: icon, action: action)
         btn.translatesAutoresizingMaskIntoConstraints = false
@@ -590,16 +601,20 @@ final class MenuBarPopoverViewController: NSViewController {
         statusStack.addArrangedSubview(title)
 
         let ideUnavailable = viewModel.ideCredentialAvailable == false
-        let ideInstalled = ideUnavailable ? (viewModel.ideAppPresenceCheck?() ?? false) : true
+        // #90: presence is an independent render-time input (spec matrix),
+        // no longer derived only inside the unavailable branch.
+        let ideInstalled = viewModel.ideAppPresenceCheck?() ?? true
+        let showBrowser = UsageViewModel.shouldShowBrowserLogin(
+            enabled: viewModel.browserLoginEnabled, ideInstalled: ideInstalled)
 
         let bodyText: String
-        if !ideUnavailable {
-            // Available or still unknown (nil): never degrade the primary path.
-            bodyText = "Sign in to the Cursor IDE to connect automatically."
-        } else if ideInstalled {
+        if !ideInstalled {
+            bodyText = "Log in with your browser to connect."
+        } else if ideUnavailable {
             bodyText = "Cursor IDE is not signed in. Open it and sign in — this app connects automatically."
         } else {
-            bodyText = "Log in with your browser to connect."
+            // Available or still unknown (nil): never degrade the primary path.
+            bodyText = "Sign in to the Cursor IDE to connect automatically."
         }
         let body = NSTextField(wrappingLabelWithString: bodyText)
         body.font      = NSFont.systemFont(ofSize: 11)
@@ -608,32 +623,44 @@ final class MenuBarPopoverViewController: NSViewController {
         body.preferredMaxLayoutWidth = 220
         statusStack.addArrangedSubview(body)
 
-        if !ideUnavailable {
-            let connectButton = NSButton(
-                title: "Connect Cursor IDE",
-                target: self,
-                action: #selector(connectIDETapped))
-            connectButton.bezelStyle    = .rounded
-            connectButton.keyEquivalent = "\r"
-            statusStack.addArrangedSubview(connectButton)
-        } else if ideInstalled {
-            let openButton = NSButton(
-                title: "Open Cursor IDE",
-                target: self,
-                action: #selector(openIDETapped))
-            openButton.bezelStyle = .rounded
-            statusStack.addArrangedSubview(openButton)
+        // IDE button always carries Enter when present (#90 supersedes the
+        // #88 rule — a deprecated path must never be the default action).
+        if ideInstalled {
+            if ideUnavailable {
+                let openButton = NSButton(
+                    title: "Open Cursor IDE",
+                    target: self,
+                    action: #selector(openIDETapped))
+                openButton.bezelStyle    = .rounded
+                openButton.keyEquivalent = "\r"
+                statusStack.addArrangedSubview(openButton)
+            } else {
+                let connectButton = NSButton(
+                    title: "Connect Cursor IDE",
+                    target: self,
+                    action: #selector(connectIDETapped))
+                connectButton.bezelStyle    = .rounded
+                connectButton.keyEquivalent = "\r"
+                statusStack.addArrangedSubview(connectButton)
+            }
         }
 
-        let browserButton = NSButton(
-            title: "Log in with Browser",
-            target: self,
-            action: #selector(loginRequiredLoginTapped))
-        browserButton.bezelStyle = .rounded
-        if ideUnavailable {
-            browserButton.keyEquivalent = "\r"
+        if showBrowser {
+            let browserButton = NSButton(
+                title: "Log in with Browser (deprecated)",
+                target: self,
+                action: #selector(loginRequiredLoginTapped))
+            browserButton.bezelStyle = .rounded
+            if !ideInstalled {
+                browserButton.keyEquivalent = "\r"   // sole button in this state
+            }
+            statusStack.addArrangedSubview(browserButton)
+        } else {
+            let hint = NSTextField(labelWithString: "Browser login can be enabled in Settings.")
+            hint.font      = NSFont.systemFont(ofSize: 10)
+            hint.textColor = NSColor.tertiaryLabelColor
+            statusStack.addArrangedSubview(hint)
         }
-        statusStack.addArrangedSubview(browserButton)
     }
 
     @objc private func connectIDETapped() {
