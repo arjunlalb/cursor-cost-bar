@@ -28,7 +28,8 @@
 - 설정 UI (새로고침 간격, 알림 임계치, 메뉴바 표시 형식, 점프 이펙트 강도, 주간 차트 스타일)
 - 로그인 시 자동 실행 지원
 - 앱 내 업데이트 확인
-- 앱 내 WebView 로그인 (Google, GitHub, Enterprise SSO 지원)
+- **제로 설정 로그인** — 같은 Mac의 Cursor IDE에 로그인되어 있으면 별도 로그인 없이 자동 연결됩니다. IDE에 로그인되어 있지 않으면 팝오버가 안내합니다: 클릭 한 번으로 IDE가 열리고, 로그인을 마치는 순간 앱이 스스로 연결됩니다. 로그아웃하면 자동 IDE 연결도 재연결 전까지 일시 중지됩니다.
+- **브라우저(WebView) 로그인은 deprecated** — 여전히 동작하지만(Google, GitHub, Enterprise SSO), 설정 → General → "Enable browser login" 옵트인 뒤로 숨겨졌습니다. Cursor IDE 앱이 설치되어 있지 않은 경우에만 자동으로 다시 노출되므로, 연결 경로가 없어지는 일은 없습니다.
 - 자동 새로고침 (1/2/5/15분 간격 선택)
 - Keychain 기반 인증 정보 저장
 - 순수 AppKit 기반 — 가벼운 메모리 풋프린트 (idle ~13 MB, 팝오버를 한 번 연 이후엔 ~30 MB; macOS가 AppKit/popover state를 유지해 다시 여는 속도 즉시). 주간 차트가 필요 없고 옛 ~15 MB 풋프린트가 더 낫다면 이전 안정 릴리즈 [v0.2.1](https://github.com/WoojinAhn/CursorMeter/releases/tag/v0.2.1) 을 받으시면 됩니다.
@@ -84,7 +85,6 @@ Unit test (LogRedactor, UsageDisplayData, DomainWhitelist, CircularProgressIcon,
 
 - [ ] 주간 차트 막대에 mode (plan/on-demand) 시각 표시 ([#69](https://github.com/WoojinAhn/CursorMeter/issues/69))
 - [ ] 주간 차트에 빌링 사이클 rollover 마커 표시 ([#70](https://github.com/WoojinAhn/CursorMeter/issues/70))
-- [ ] 인증 방식을 WebView 쿠키 캡처에서 API 토큰 paste 로 마이그레이션 ([#54](https://github.com/WoojinAhn/CursorMeter/issues/54))
 
 ## 기여하기
 
