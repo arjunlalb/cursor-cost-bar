@@ -40,7 +40,7 @@ Every feature issue follows this sequence:
 1. **Test case selection** — Define tests for the logic being changed/added before writing code
 2. **Implementation** — Write feature code and test code together
 3. **`swift test`** — All tests must pass
-4. **Commit/push** — Reference issue number in commit message
+4. **Commit/push** — Reference issue number in commit message. **After pushing, check CI** (`gh run list --limit 1`) — the Test workflow ran red for a full day of pushes once (#84 strict-isolation break) and was only noticed when it blocked a release
 5. **Screenshot refresh (UI-visible changes)** — If the change alters anything shown in `docs/screenshots/`, recapture the affected shots in the same issue (AX-path-driven automation; see #91). **PII rule: the real name / company email in the popover header must never appear** — crop the user-info row (precedent: `popover.png`) or use the "Demo User" overlay (precedent: `popover-weekly.png`), and inspect every capture BEFORE `git add`
 6. **Post-close check** — After closing an issue, run `gh issue list --state open` and show remaining issues to the user
 
@@ -52,6 +52,14 @@ Popover/menu-bar 등 시각적 UI 변경 사전 정렬 시 `docs/mockup-<issue>.
 before/after side-by-side 작성 → `open` 명령으로 시각 확인 후 사용자와 합의.
 AppKit 컨텍스트라 글로벌 CLAUDE.md의 Playwright/Magic MCP UI workflow는 적용
 불가 — HTML mockup이 우회로.
+
+## AX-Driven UI Verification
+
+Popover/Settings live checks run through `osascript` System Events — **element paths only, never screen coordinates** (a stray coordinate click once silently corrupted two persisted settings):
+
+- Popover path: `pop over 1 of menu bar item 1 of menu bar 1` (status-item click toggles — retry-loop open, don't assume state). Buttons/sliders inside are addressable by name; the popover is not exposed as a `window`
+- `switch` is an AppleScript reserved word; NSSwitch AXPress can double-fire its action — to flip a persisted toggle for a capture, use kill → `defaults write` → relaunch instead of clicking the switch
+- Capture via AX frame: `get {position, size}` then `screencapture -x` + `sips` crop (sips silently ignores a crop that keeps the full width — reduce both dimensions)
 
 ## Release Workflow
 
@@ -96,7 +104,7 @@ Two undocumented endpoints used (cookie-based auth, no official schema):
 ## Conventions
 
 - Swift 6 strict concurrency: `@MainActor`, `actor`, `Sendable`
-- CI Xcode 16.4 / macOS 15.5 SDK is stricter than local Xcode on Sendable across `await`. Non-Sendable Apple SDK types (e.g. `UNNotificationSettings`) returned to a `nonisolated` context need `@preconcurrency import` on the framework
+- CI Xcode 16.4 / macOS 15.5 SDK is stricter than local Xcode on Sendable across `await`. Non-Sendable Apple SDK types (e.g. `UNNotificationSettings`) returned to a `nonisolated` context need `@preconcurrency import` on the framework. Also: a `static let` in a `@MainActor` test class is actor-isolated on CI — referencing it from the `nonisolated` `setUp`/`tearDown` overrides fails there (compiles locally); declare such constants `nonisolated static let`
 - Zero external dependencies — macOS SDK only (`Foundation`, `AppKit`, `Security`, `WebKit`, `UserNotifications`)
 - `URLSessionConfiguration.ephemeral` — no disk cache (also applies to `UpdateChecker`)
 - Keychain via standard macOS Keychain (Data Protection Keychain requires entitlements unavailable to ad-hoc signed apps)
