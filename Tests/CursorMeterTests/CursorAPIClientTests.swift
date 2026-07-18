@@ -238,6 +238,27 @@ final class CursorAPIClientTests: XCTestCase {
 
     // MARK: - Helpers
 
+    /// #89: /api/dashboard/teams dropped GET support (405) — the request must
+    /// be POST with the bare-host Origin, like every other dashboard endpoint.
+    func testFetchTeamsSendsPostWithOrigin() async throws {
+        final class RequestBox: @unchecked Sendable {
+            var method: String?
+            var origin: String?
+        }
+        let box = RequestBox()
+        MockURLProtocol.requestHandler = { request in
+            box.method = request.httpMethod
+            box.origin = request.value(forHTTPHeaderField: "Origin")
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, Data("{\"teams\":[{\"id\":1,\"name\":\"t\"}]}".utf8))
+        }
+
+        _ = try await client.fetchTeams(cookieHeader: "WorkosCursorSessionToken=test")
+
+        XCTAssertEqual(box.method, "POST")
+        XCTAssertEqual(box.origin, "https://cursor.com")
+    }
+
     private func setMockResponse(statusCode: Int, json: String) {
         MockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(

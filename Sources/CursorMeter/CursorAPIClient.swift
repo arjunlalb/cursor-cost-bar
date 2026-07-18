@@ -51,7 +51,15 @@ actor CursorAPIClient {
     /// for the analytics endpoint — required on enterprise accounts and
     /// expected to fail (non-200 or empty) on personal plans.
     func fetchTeams(cookieHeader: String) async throws -> TeamsResponse {
-        let data = try await performRequest(url: Self.teamsURL, cookieHeader: cookieHeader)
+        // #89: the endpoint dropped GET support (405 as of 2026-07-18) —
+        // POST + bare-host Origin like the other dashboard endpoints.
+        let data = try await performRequest(
+            url: Self.teamsURL,
+            cookieHeader: cookieHeader,
+            method: "POST",
+            body: Data("{}".utf8),
+            origin: "https://cursor.com"
+        )
         return try JSONDecoder().decode(TeamsResponse.self, from: data)
     }
 
