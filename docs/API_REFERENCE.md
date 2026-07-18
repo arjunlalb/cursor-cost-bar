@@ -54,9 +54,9 @@ Response (excerpt):
 
 The `?user=<sub>` query parameter takes the `sub` returned by `/api/auth/me`.
 
-### `GET /api/dashboard/teams`
+### `POST /api/dashboard/teams`
 
-Sole source of `teamId` for the analytics endpoints. Used by `CursorAPIClient.fetchTeams` to discover the active team once per session (cached afterwards). Response:
+Sole source of `teamId` for the analytics endpoints. Used by `CursorAPIClient.fetchTeams` to discover the active team once per session (cached afterwards). GET support was dropped server-side ~2026-07-18 (405) — requires POST with an empty JSON body and `Origin: https://cursor.com` like the other dashboard endpoints (#89). Response:
 
 ```json
 { "teams": [{ "id": 13403082, "name": "..." }] }
