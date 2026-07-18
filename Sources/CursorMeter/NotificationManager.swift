@@ -220,7 +220,9 @@ final class NotificationManager {
     /// banner instead of stacking duplicates in Notification Center.
     nonisolated static let sessionExpiredIdentifier = "session-expired"
     nonisolated static let sessionExpiredTitle = "Cursor session expired"
-    nonisolated static let sessionExpiredBody = "Log in again to keep monitoring your Cursor usage."
+    // #90: routing-neutral copy — the click may open the popover guidance
+    // instead of a login window depending on the browser-login opt-in.
+    nonisolated static let sessionExpiredBody = "Reconnect to keep monitoring your Cursor usage."
 
     func notifySessionExpired() async {
         await sendNotification(

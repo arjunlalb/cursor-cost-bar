@@ -324,6 +324,13 @@ final class IDESignInGuidanceTests: XCTestCase {
 @MainActor
 final class BrowserLoginDeprecationTests: XCTestCase {
 
+    // Clear on BOTH sides: a leaked true from a prior run would flip the
+    // defaults-off assertion before tearDown ever runs.
+    override func setUp() {
+        super.setUp()
+        UserDefaults.standard.removeObject(forKey: "browserLoginEnabled")
+    }
+
     override func tearDown() {
         UserDefaults.standard.removeObject(forKey: "browserLoginEnabled")
         super.tearDown()
