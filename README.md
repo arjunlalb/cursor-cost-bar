@@ -20,11 +20,11 @@ Unlike in-editor extensions, CursorMeter runs independently as a native macOS ap
 ## Features
 
 - Gauge ring icon in menu bar with color thresholds (green → yellow → red)
-- View billing usage, per-model request counts, and reset date from the menu bar
+- View billing usage, request counts, and reset date from the menu bar
 - macOS notifications when usage reaches customizable thresholds (default: 80%/90%)
-- **Usage-jump effect** — menu bar icon flashes ⚡ on a moderate jump and 🚀 on a Max-mode-sized jump, so a sudden spike is hard to miss. Three intensity levels (Quiet / Normal / Bold); Bold also raises a macOS notification on tier-2 jumps.
+- **Usage-jump effect** — menu bar icon flashes ⚡ on a moderate jump and 🚀 on a Max-mode-sized jump, so a sudden spike is hard to miss. Three intensity levels (Quiet / Normal / Bold) and a choice of glyph style (⚡/🚀 or 💲/💸); Bold also raises a macOS notification on tier-2 jumps.
 - **Weekly usage chart** (enterprise team accounts) — rolling 7-day bar graph in the popover. Bar heights sum Cursor's weighted billing units (`requestsCosts`), so a single Max-mode Opus call correctly outweighs many light auto-completes. Hover tooltip switches per day: raw weighted-unit integer on plan-covered days, real dollars charged on on-demand days. Configurable today-highlight (Outline / Dim others / Both).
-- Menu bar display mode toggle: fraction (used/limit) or percentage (%)
+- Menu bar display mode: icon only, fraction (used/limit), or percentage (%)
 - Settings UI (refresh interval, notification thresholds, menu bar display format, jump-effect intensity, weekly-chart style)
 - Launch at login support
 - In-app update checker
@@ -75,7 +75,7 @@ Requires Swift 6.0+ and Xcode.
 swift test    # Run all tests (requires Xcode)
 ```
 
-Unit tests (LogRedactor, UsageDisplayData, DomainWhitelist, CircularProgressIcon, NotificationManager) + Integration tests (CursorAPIClient with URLProtocol mock). See [test-checklist.md](docs/test-checklist.md) for manual test scenarios.
+400+ tests across 24 suites: view-model logic (credential chain, stale detection, thresholds, jump events), custom controls (dual-thumb range slider), notification rules, log redaction, and API-client integration via a URLProtocol mock. See [test-checklist.md](docs/test-checklist.md) for manual test scenarios.
 
 ## Disclaimer
 

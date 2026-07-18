@@ -20,11 +20,11 @@
 ## 주요 기능
 
 - 메뉴바 게이지 링 아이콘으로 사용량 시각화 (초록 → 노랑 → 빨강 색상 단계)
-- 메뉴바에서 빌링 사용량, 모델별 요청 횟수, 리셋 날짜 확인
+- 메뉴바에서 빌링 사용량, 요청 횟수, 리셋 날짜 확인
 - 사용량 임계치 도달 시 macOS 알림 (기본값: 80%/90%, 커스텀 가능)
-- **사용량 점프 이펙트** — 사용량이 한 번에 크게 올라가면 메뉴바 아이콘에 ⚡(중간 점프) 또는 🚀(Max 모드급 점프)가 잠시 표시되어, 갑작스런 증가를 놓치지 않게 합니다. 강도 3단계(Quiet / Normal / Bold) 선택 가능, Bold + 큰 점프 조합에선 macOS 알림도 함께 띄움.
+- **사용량 점프 이펙트** — 사용량이 한 번에 크게 올라가면 메뉴바 아이콘에 ⚡(중간 점프) 또는 🚀(Max 모드급 점프)가 잠시 표시되어, 갑작스런 증가를 놓치지 않게 합니다. 강도 3단계(Quiet / Normal / Bold)와 글리프 스타일(⚡/🚀 또는 💲/💸) 선택 가능, Bold + 큰 점프 조합에선 macOS 알림도 함께 띄움.
 - **주간 사용량 차트** (엔터프라이즈 팀 계정) — 팝오버에 최근 7일 막대 그래프 표시. 막대 높이는 Cursor의 가중 과금 단위(`requestsCosts`) 합으로 그려져, Max-mode Opus 한 콜이 가벼운 자동완성 수십 개를 상대적으로 압도합니다. 호버 tooltip은 plan 흡수된 날은 가중 단위 정수, on-demand 청구된 날은 실제 달러로 자동 분기. 오늘 강조 스타일 3가지(Outline / Dim / Both) 선택 가능.
-- 메뉴바 표시 모드 전환: 분수(사용/한도) 또는 퍼센트(%)
+- 메뉴바 표시 모드: 아이콘만, 분수(사용/한도), 퍼센트(%) 중 선택
 - 설정 UI (새로고침 간격, 알림 임계치, 메뉴바 표시 형식, 점프 이펙트 강도, 주간 차트 스타일)
 - 로그인 시 자동 실행 지원
 - 앱 내 업데이트 확인
@@ -75,7 +75,7 @@ Swift 6.0+ 및 Xcode가 필요합니다.
 swift test    # 전체 테스트 실행 (Xcode 필요)
 ```
 
-Unit test (LogRedactor, UsageDisplayData, DomainWhitelist, CircularProgressIcon, NotificationManager) + Integration test (CursorAPIClient with URLProtocol mock). 수동 테스트 항목은 [test-checklist.md](docs/test-checklist.md) 참고.
+24개 스위트, 400+ 테스트: 뷰모델 로직(인증 체인, stale 감지, 임계치, 점프 이벤트), 커스텀 컨트롤(듀얼썸 range slider), 알림 규칙, 로그 마스킹, URLProtocol mock 기반 API 클라이언트 통합 테스트. 수동 테스트 항목은 [test-checklist.md](docs/test-checklist.md) 참고.
 
 ## 주의사항
 
