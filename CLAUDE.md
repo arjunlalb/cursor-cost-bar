@@ -41,7 +41,8 @@ Every feature issue follows this sequence:
 2. **Implementation** — Write feature code and test code together
 3. **`swift test`** — All tests must pass
 4. **Commit/push** — Reference issue number in commit message
-5. **Post-close check** — After closing an issue, run `gh issue list --state open` and show remaining issues to the user
+5. **Screenshot refresh (UI-visible changes)** — If the change alters anything shown in `docs/screenshots/`, recapture the affected shots in the same issue (AX-path-driven automation; see #91). **PII rule: the real name / company email in the popover header must never appear** — crop the user-info row (precedent: `popover.png`) or use the "Demo User" overlay (precedent: `popover-weekly.png`), and inspect every capture BEFORE `git add`
+6. **Post-close check** — After closing an issue, run `gh issue list --state open` and show remaining issues to the user
 
 Out-of-scope discoveries during work (bugs / risks outside the requested change) → record in `.claude/notes.md` (gitignored), do not auto-fix.
 
