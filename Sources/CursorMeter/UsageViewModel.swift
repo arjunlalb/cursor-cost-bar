@@ -249,6 +249,96 @@ final class UsageViewModel {
     /// CursorAppAuthReader in CursorMeterApp (same pattern as the #83 seams).
     @ObservationIgnored internal var ideCredentialProvider: (@Sendable () -> IDECredential?)?
 
+    // MARK: - IDE availability & sign-in watch (#88)
+
+    /// Whether the Cursor IDE currently has a session. nil until the first
+    /// check completes; drives the login-required layout branch. Presence
+    /// only — intentionally ignores `ideAuthSuppressed` (display concern).
+    var ideCredentialAvailable: Bool?
+
+    /// Is the Cursor IDE app installed? Production wires NSWorkspace lookup.
+    @ObservationIgnored internal var ideAppPresenceCheck: (() -> Bool)?
+    /// Launches the Cursor IDE app; completion reports launch success.
+    @ObservationIgnored internal var ideAppLauncher: ((@escaping @MainActor (Bool) -> Void) -> Void)?
+    @ObservationIgnored internal var watchTickInterval: Duration = .seconds(3)
+    @ObservationIgnored internal var watchTimeout: Duration = .seconds(60)
+
+    /// Two separate monotonic tokens (codex review): sharing one would let a
+    /// routine availability probe (every login-layout render) invalidate an
+    /// active watch.
+    /// - `ideProbeGeneration` orders availability reads: a stale off-main
+    ///   result can never overwrite a newer flag.
+    /// - `ideWatchGeneration` scopes the watch and the pending launch
+    ///   completion: bumped on restart and logout, so a late launch success
+    ///   or provider read can neither start nor continue a watch the user
+    ///   has implicitly cancelled.
+    @ObservationIgnored private var ideProbeGeneration = 0
+    @ObservationIgnored private var ideWatchGeneration = 0
+    @ObservationIgnored private var availabilityCheckInFlight = false
+    @ObservationIgnored private var ideSignInWatchTask: Task<Void, Never>?
+
+    /// Async availability probe (login-layout render path). Deduped while a
+    /// read is in flight; writes the flag only on change so observation does
+    /// not re-render (and re-probe) in a loop.
+    func refreshIDEAvailability() {
+        guard let provider = ideCredentialProvider, !availabilityCheckInFlight else { return }
+        availabilityCheckInFlight = true
+        ideProbeGeneration += 1
+        let generation = ideProbeGeneration
+        Task { [weak self] in
+            let available = await Task.detached { provider() != nil }.value
+            guard let self else { return }
+            self.availabilityCheckInFlight = false
+            guard generation == self.ideProbeGeneration else { return }
+            self.setIDEAvailability(available)
+        }
+    }
+
+    private func setIDEAvailability(_ available: Bool) {
+        if ideCredentialAvailable != available {
+            ideCredentialAvailable = available
+        }
+    }
+
+    /// [Open Cursor IDE]: launch the IDE; only a successful launch starts the
+    /// sign-in watch (a failed launch must not leave a background poll).
+    func openIDEAndWatch() {
+        guard let launcher = ideAppLauncher else { return }
+        let generation = ideWatchGeneration
+        launcher { [weak self] success in
+            guard let self, success,
+                  generation == self.ideWatchGeneration else { return }
+            self.beginIDESignInWatch()
+        }
+    }
+
+    /// Polls the IDE credential (tick/timeout above) and auto-connects when
+    /// the user finishes signing in. Per tick: logged in → stop; credential
+    /// present and no refresh in flight → connect (a collision retries next
+    /// tick). Restart cancels the prior task; logout invalidates any pending
+    /// read via the generation token.
+    func beginIDESignInWatch() {
+        ideSignInWatchTask?.cancel()
+        guard let provider = ideCredentialProvider else { return }
+        ideWatchGeneration += 1
+        let generation = ideWatchGeneration
+        let interval = watchTickInterval
+        let timeout = watchTimeout
+        ideSignInWatchTask = Task { [weak self] in
+            let clock = ContinuousClock()
+            let deadline = clock.now.advanced(by: timeout)
+            while !Task.isCancelled, clock.now < deadline {
+                guard let self, self.authState != .loggedIn else { return }
+                let found = await Task.detached { provider() != nil }.value
+                guard !Task.isCancelled, generation == self.ideWatchGeneration else { return }
+                if found, self.authState != .loggedIn, !self.isRefreshing {
+                    self.connectViaIDE()
+                }
+                try? await Task.sleep(for: interval)
+            }
+        }
+    }
+
     // Previous canonical values for delta tracking. Reset to nil when display mode changes
     // (e.g. plan migration) so we don't compare across incompatible units.
     private var previousPlanUsedCents: Int?
@@ -394,21 +484,26 @@ final class UsageViewModel {
         }
 
         // Chain step 1: IDE credential (#54). Read off-main — the reader's
-        // SQLite busy_timeout can block up to 250ms.
-        if let provider = ideCredentialProvider, !ideAuthSuppressed,
-           let ide = await Task.detached(operation: { provider() }).value {
-            do {
-                try await runRefreshAttempt(cookieHeader: ide.cookieHeader)
-                authState = .loggedIn
-                activeAuthSource = .cursorIDE
-                return
-            } catch APIError.unauthorized {
-                // Fall through to the captured cookie. The IDE credential is
-                // unrelated to it — never clear keychain or notify here.
-                Log.error("IDE credential rejected (401) — falling back to captured cookie")
-            } catch {
-                await handleRefreshError(error)
-                return
+        // SQLite busy_timeout can block up to 250ms. The read also publishes
+        // availability (#88) so a failed connect flips the login layout to
+        // the guidance state immediately.
+        if let provider = ideCredentialProvider, !ideAuthSuppressed {
+            let ideCredential = await Task.detached(operation: { provider() }).value
+            setIDEAvailability(ideCredential != nil)
+            if let ide = ideCredential {
+                do {
+                    try await runRefreshAttempt(cookieHeader: ide.cookieHeader)
+                    authState = .loggedIn
+                    activeAuthSource = .cursorIDE
+                    return
+                } catch APIError.unauthorized {
+                    // Fall through to the captured cookie. The IDE credential is
+                    // unrelated to it — never clear keychain or notify here.
+                    Log.error("IDE credential rejected (401) — falling back to captured cookie")
+                } catch {
+                    await handleRefreshError(error)
+                    return
+                }
             }
         }
 
@@ -867,6 +962,13 @@ final class UsageViewModel {
     }
 
     func logout() {
+        // Stop the sign-in watch and invalidate pending provider reads AND
+        // any in-flight launch completion — a late result must not reconnect
+        // against the user's intent (#88).
+        ideSignInWatchTask?.cancel()
+        ideSignInWatchTask = nil
+        ideProbeGeneration += 1
+        ideWatchGeneration += 1
         // Suppress the IDE source, or logout would silently resurrect on the
         // next refresh (#54).
         ideAuthSuppressed = true

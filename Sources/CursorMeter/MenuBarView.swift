@@ -571,7 +571,15 @@ final class MenuBarPopoverViewController: NSViewController {
 
     /// Logged-out / expired state: IDE-first guidance (#54) with the browser
     /// login as the secondary path (#76 kept the prominent recovery layout).
+    /// Branches on IDE credential availability (#88): when the IDE has no
+    /// session, [Connect Cursor IDE] is replaced by an [Open Cursor IDE]
+    /// inducement (or hidden entirely when the IDE app is absent) and the
+    /// browser login becomes the default action.
     private func applyLoginRequiredStatus() {
+        // Re-probe on every render; the observable flag re-renders this
+        // layout when the answer changes (popover reopen included).
+        viewModel.refreshIDEAvailability()
+
         statusStack.orientation = .vertical
         statusStack.alignment   = .centerX
         statusStack.spacing     = 6
@@ -579,34 +587,61 @@ final class MenuBarPopoverViewController: NSViewController {
         let title = NSTextField(labelWithString:
             viewModel.authState == .loginRequired ? "⚠️ Session expired" : "Not connected")
         title.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        statusStack.addArrangedSubview(title)
 
-        let body = NSTextField(wrappingLabelWithString: "Sign in to the Cursor IDE to connect automatically.")
+        let ideUnavailable = viewModel.ideCredentialAvailable == false
+        let ideInstalled = ideUnavailable ? (viewModel.ideAppPresenceCheck?() ?? false) : true
+
+        let bodyText: String
+        if !ideUnavailable {
+            // Available or still unknown (nil): never degrade the primary path.
+            bodyText = "Sign in to the Cursor IDE to connect automatically."
+        } else if ideInstalled {
+            bodyText = "Cursor IDE is not signed in. Open it and sign in — this app connects automatically."
+        } else {
+            bodyText = "Log in with your browser to connect."
+        }
+        let body = NSTextField(wrappingLabelWithString: bodyText)
         body.font      = NSFont.systemFont(ofSize: 11)
         body.textColor = NSColor.secondaryLabelColor
         body.alignment = .center
         body.preferredMaxLayoutWidth = 220
+        statusStack.addArrangedSubview(body)
 
-        let connectButton = NSButton(
-            title: "Connect Cursor IDE",
-            target: self,
-            action: #selector(connectIDETapped))
-        connectButton.bezelStyle    = .rounded
-        connectButton.keyEquivalent = "\r"
+        if !ideUnavailable {
+            let connectButton = NSButton(
+                title: "Connect Cursor IDE",
+                target: self,
+                action: #selector(connectIDETapped))
+            connectButton.bezelStyle    = .rounded
+            connectButton.keyEquivalent = "\r"
+            statusStack.addArrangedSubview(connectButton)
+        } else if ideInstalled {
+            let openButton = NSButton(
+                title: "Open Cursor IDE",
+                target: self,
+                action: #selector(openIDETapped))
+            openButton.bezelStyle = .rounded
+            statusStack.addArrangedSubview(openButton)
+        }
 
         let browserButton = NSButton(
             title: "Log in with Browser",
             target: self,
             action: #selector(loginRequiredLoginTapped))
         browserButton.bezelStyle = .rounded
-
-        statusStack.addArrangedSubview(title)
-        statusStack.addArrangedSubview(body)
-        statusStack.addArrangedSubview(connectButton)
+        if ideUnavailable {
+            browserButton.keyEquivalent = "\r"
+        }
         statusStack.addArrangedSubview(browserButton)
     }
 
     @objc private func connectIDETapped() {
         viewModel.connectViaIDE()
+    }
+
+    @objc private func openIDETapped() {
+        viewModel.openIDEAndWatch()
     }
 
     @objc private func loginRequiredLoginTapped() {
