@@ -48,6 +48,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         let authReader = CursorAppAuthReader()
         viewModel.ideCredentialProvider = { authReader.read() }
 
+        // #88: IDE app presence + launcher for the sign-in inducement.
+        viewModel.ideAppPresenceCheck = { Self.cursorIDEAppURL() != nil }
+        viewModel.ideAppLauncher = { completion in
+            guard let appURL = Self.cursorIDEAppURL() else {
+                completion(false)
+                return
+            }
+            NSWorkspace.shared.openApplication(
+                at: appURL,
+                configuration: NSWorkspace.OpenConfiguration()
+            ) { app, _ in
+                Task { @MainActor in completion(app != nil) }
+            }
+        }
+
         UNUserNotificationCenter.current().delegate = self
 
         setupStatusItem()
@@ -282,6 +297,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         }
     }
 
+    // MARK: - Cursor IDE app lookup (#88)
+
+    /// Cursor's bundle id (ToDesktop-packaged; verified locally 2026-07-18),
+    /// with a by-name fallback in case a future repackage changes it.
+    private static func cursorIDEAppURL() -> URL? {
+        if let url = NSWorkspace.shared.urlForApplication(
+            withBundleIdentifier: "com.todesktop.230313mzl4w4u92") {
+            return url
+        }
+        let byName = URL(fileURLWithPath: "/Applications/Cursor.app")
+        return FileManager.default.fileExists(atPath: byName.path) ? byName : nil
+    }
+
     // MARK: - NSPopoverDelegate
 
     func popoverDidClose(_ notification: Notification) {
@@ -341,6 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             _ = viewModel.weeklyChartStyle
             _ = viewModel.consecutiveFailureCount
             _ = viewModel.lastSuccessAt
+            _ = viewModel.ideCredentialAvailable
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
