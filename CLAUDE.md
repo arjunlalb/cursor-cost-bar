@@ -40,7 +40,7 @@ Every feature issue follows this sequence:
 1. **Test case selection** — Define tests for the logic being changed/added before writing code
 2. **Implementation** — Write feature code and test code together
 3. **`swift test`** — All tests must pass
-4. **Commit/push** — Reference issue number in commit message. **After pushing, check CI** (`gh run list --limit 1`) — the Test workflow ran red for a full day of pushes once (#84 strict-isolation break) and was only noticed when it blocked a release
+4. **Commit/push** — Reference issue number in commit message. **After pushing, check CI** (`gh run list --limit 1`) — the Test workflow ran red for a full day of pushes once (#84 strict-isolation break) and was only noticed when it blocked a release. Note: `test.yml` triggers only on **main push + PR** — feature-branch pushes run no CI, so branch work gets its first CI signal at merge (or open a PR)
 5. **Screenshot refresh (UI-visible changes)** — If the change alters anything shown in `docs/screenshots/`, recapture the affected shots in the same issue (AX-path-driven automation; see #91). **PII rule: the real name / company email in the popover header must never appear** — crop the user-info row (precedent: `popover.png`) or use the "Demo User" overlay (precedent: `popover-weekly.png`), and inspect every capture BEFORE `git add`
 6. **Post-close check** — After closing an issue, run `gh issue list --state open` and show remaining issues to the user
 
