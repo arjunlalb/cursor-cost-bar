@@ -263,6 +263,11 @@ final class IDESignInGuidanceTests: XCTestCase {
     func test_availabilityProbeDuringWatch_doesNotKillWatch() async {
         let box = CredentialBox()   // starts signed-out
         let vm = makeViewModel(box: box)
+        // Probe-survival is the subject here, not expiry (that's
+        // test_watch_timeout_stopsWithoutConnect). The suite-default 300ms
+        // timeout sat inside CI scheduling jitter around the three 30ms probe
+        // sleeps below — the watch expired before the sign-in landed (#96).
+        vm.watchTimeout = .seconds(10)
         MockURLProtocol.requestHandler = Self.successHandler
         vm.ideAppLauncher = { completion in completion(true) }
 
