@@ -170,6 +170,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             self.popover.contentSize = size
         }
         popover.contentViewController = popoverVC
+        // #94: the closed-popover updateUI skip below removes the observation
+        // pass that used to force loadView at launch. Keep building the view
+        // eagerly so first-open latency is unchanged — lazification is #95's
+        // call, gated on measured numbers.
+        popoverVC.loadViewIfNeeded()
     }
 
     private func showPopover() {
@@ -425,7 +430,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                (self.popover.contentViewController as? MenuBarPopoverViewController)?.updateUI()
+                // #94: no layout pass while closed — showPopover() refreshes
+                // at open. The re-arm below must run regardless, or updates
+                // stop forever after the first skipped change.
+                if self.popover.isShown {
+                    (self.popover.contentViewController as? MenuBarPopoverViewController)?.updateUI()
+                }
                 self.observePopover()
             }
         }

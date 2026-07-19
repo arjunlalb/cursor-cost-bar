@@ -110,6 +110,9 @@ final class MenuBarPopoverViewController: NSViewController {
     /// Test seam (#87): width the popover content demands from AutoLayout.
     func testHook_contentFittingWidth() -> CGFloat { rootStack.fittingSize.width }
 
+    /// Test seam (#94): current auth-row button (nil while the row is hidden).
+    func testHook_authRowButton() -> NSButton? { authContainer.subviews.first as? NSButton }
+
     /// Called by the owner whenever viewModel state changes.
     func updateUI() {
         if let data = viewModel.usageData {
@@ -402,9 +405,12 @@ final class MenuBarPopoverViewController: NSViewController {
         rebuildAuthButton()
     }
 
-    private func rebuildAuthButton() {
-        authContainer.subviews.forEach { $0.removeFromSuperview() }
+    /// Derived state of the currently built auth row ("hidden" or the button
+    /// title). Guards rebuildAuthButton against recreating an identical button
+    /// on every updateUI pass (#94).
+    private var lastAuthRowKey: String?
 
+    private func rebuildAuthButton() {
         let (title, icon): (String, String)
         let action: () -> Void
 
@@ -417,6 +423,9 @@ final class MenuBarPopoverViewController: NSViewController {
             guard UsageViewModel.shouldShowBrowserLogin(
                 enabled: viewModel.browserLoginEnabled, ideInstalled: ideInstalled)
             else {
+                guard lastAuthRowKey != "hidden" else { return }
+                lastAuthRowKey = "hidden"
+                authContainer.subviews.forEach { $0.removeFromSuperview() }
                 authContainer.isHidden = true
                 return
             }
@@ -428,6 +437,9 @@ final class MenuBarPopoverViewController: NSViewController {
             icon   = "person.slash"
             action = { [weak self] in self?.viewModel.logout() }
         }
+        guard lastAuthRowKey != title else { return }
+        lastAuthRowKey = title
+        authContainer.subviews.forEach { $0.removeFromSuperview() }
         authContainer.isHidden = false
 
         let btn = makeMenuRowButton(title: title, symbolName: icon, action: action)
