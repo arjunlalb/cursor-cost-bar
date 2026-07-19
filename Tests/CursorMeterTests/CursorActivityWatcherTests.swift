@@ -73,4 +73,47 @@ final class CursorActivityWatcherTests: XCTestCase {
         XCTAssertEqual(fired, 0)
         watcher.stop()    // idempotent, must not crash
     }
+
+    func testDeleteRecreateKeepsDelivering() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("wal")
+        try Data("x".utf8).write(to: file)
+
+        var fired = 0
+        let watcher = CursorActivityWatcher(filePath: file.path) { fired += 1 }
+        watcher.start()
+
+        try FileManager.default.removeItem(at: file)
+        try? await Task.sleep(for: .milliseconds(100))
+        try Data("z".utf8).write(to: file)          // recreate = activity
+        await waitUntil { fired >= 1 }
+        let afterRecreate = fired
+
+        try append("w", to: file)                    // events on the NEW file
+        await waitUntil { fired > afterRecreate }
+        XCTAssertGreaterThan(fired, afterRecreate)
+        watcher.stop()
+    }
+
+    func testAbsentFileAttachesWhenItAppears() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("wal")   // does not exist yet
+
+        var fired = 0
+        let watcher = CursorActivityWatcher(filePath: file.path) { fired += 1 }
+        watcher.start()
+        XCTAssertTrue(watcher.isWatching)   // dir fallback counts as watching
+
+        try Data("x".utf8).write(to: file)
+        await waitUntil { fired >= 1 }      // appearance itself is activity
+        XCTAssertGreaterThanOrEqual(fired, 1)
+
+        let beforeAppend = fired
+        try append("y", to: file)           // now attached to the file itself
+        await waitUntil { fired > beforeAppend }
+        XCTAssertGreaterThan(fired, beforeAppend)
+        watcher.stop()
+    }
 }

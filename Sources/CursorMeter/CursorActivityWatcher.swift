@@ -18,6 +18,7 @@ final class CursorActivityWatcher {
     private let directoryPath: String
     private let onActivity: @MainActor () -> Void
     private var fileSource: (any DispatchSourceFileSystemObject)?
+    private var directorySource: (any DispatchSourceFileSystemObject)?
     private(set) var isWatching = false
 
     init(
@@ -31,7 +32,7 @@ final class CursorActivityWatcher {
 
     func start() {
         guard !isWatching else { return }
-        isWatching = attachToFile()
+        isWatching = attachToFile() || attachToDirectory()
         if !isWatching {
             Log.info("CursorActivityWatcher inactive: watch target unavailable")
         }
@@ -40,6 +41,8 @@ final class CursorActivityWatcher {
     func stop() {
         fileSource?.cancel()
         fileSource = nil
+        directorySource?.cancel()
+        directorySource = nil
         isWatching = false
     }
 
@@ -65,15 +68,42 @@ final class CursorActivityWatcher {
         return true
     }
 
+    @discardableResult
+    private func attachToDirectory() -> Bool {
+        guard directorySource == nil else { return true }
+        let fd = open(directoryPath, O_EVTONLY)
+        guard fd >= 0 else { return false }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd, eventMask: .write, queue: .main
+        )
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                self?.handleDirectoryEvent()
+            }
+        }
+        source.setCancelHandler { close(fd) }
+        directorySource = source
+        source.resume()
+        return true
+    }
+
+    private func handleDirectoryEvent() {
+        guard FileManager.default.fileExists(atPath: filePath), attachToFile() else { return }
+        directorySource?.cancel()
+        directorySource = nil
+        onActivity()   // the WAL appearing IS activity
+    }
+
     private func handleFileEvent() {
         guard let source = fileSource else { return }
         let events = source.data
         if events.contains(.delete) || events.contains(.rename) {
-            // SQLite checkpoint replaced the WAL; the old fd is dead.
+            // SQLite checkpoint removed/replaced the WAL; the old fd is dead.
             fileSource?.cancel()
             fileSource = nil
-            isWatching = attachToFile()
-            // Task 2 replaces this branch with the directory fallback.
+            if !attachToFile() {
+                isWatching = attachToDirectory()
+            }
         } else {
             onActivity()
         }
