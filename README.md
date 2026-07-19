@@ -31,6 +31,7 @@ Unlike in-editor extensions, CursorMeter runs independently as a native macOS ap
 - **Zero-config login** — if the Cursor IDE is signed in on the same Mac, CursorMeter connects automatically (no separate login). If the IDE isn't signed in yet, the popover guides you: one click opens the IDE, and the app connects itself the moment you finish signing in. Logging out pauses the automatic IDE connection until you reconnect.
 - **Browser (WebView) login is deprecated** — it still works (Google, GitHub, Enterprise SSO), but is hidden behind an opt-in: Settings → General → "Enable browser login". It reappears automatically only when the Cursor IDE app is not installed, so there is always at least one way to connect.
 - Auto-refresh at configurable intervals (1/2/5/15 min)
+- **Activity-driven refresh** — when you use Cursor, the app refreshes within ~1 minute instead of waiting for the next poll, so usage stays current right after a burst of work. Interval polling remains the fallback. Toggle in Settings → General → "Refresh on Cursor activity".
 - Keychain-based credential storage
 - Pure AppKit — light memory footprint (~17 MB idle, ~33 MB once the popover has been opened; macOS retains AppKit / popover state for instant re-opens). If you don't need the weekly chart and want the older ~15 MB footprint instead, [v0.2.1](https://github.com/WoojinAhn/CursorMeter/releases/tag/v0.2.1) is the previous stable release.
 

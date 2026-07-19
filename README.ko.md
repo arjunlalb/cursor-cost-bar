@@ -31,6 +31,7 @@
 - **제로 설정 로그인** — 같은 Mac의 Cursor IDE에 로그인되어 있으면 별도 로그인 없이 자동 연결됩니다. IDE에 로그인되어 있지 않으면 팝오버가 안내합니다: 클릭 한 번으로 IDE가 열리고, 로그인을 마치는 순간 앱이 스스로 연결됩니다. 로그아웃하면 자동 IDE 연결도 재연결 전까지 일시 중지됩니다.
 - **브라우저(WebView) 로그인은 deprecated** — 여전히 동작하지만(Google, GitHub, Enterprise SSO), 설정 → General → "Enable browser login" 옵트인 뒤로 숨겨졌습니다. Cursor IDE 앱이 설치되어 있지 않은 경우에만 자동으로 다시 노출되므로, 연결 경로가 없어지는 일은 없습니다.
 - 자동 새로고침 (1/2/5/15분 간격 선택)
+- **활동 기반 새로고침** — Cursor를 사용하면 다음 폴링을 기다리지 않고 약 1분 내에 앱이 새로고침되어, 작업 직후에도 사용량이 최신 상태로 유지됩니다. 간격 폴링은 fallback으로 계속 동작합니다. 설정 → General → "Refresh on Cursor activity"에서 켜고 끌 수 있습니다.
 - Keychain 기반 인증 정보 저장
 - 순수 AppKit 기반 — 가벼운 메모리 풋프린트 (idle ~17 MB, 팝오버를 한 번 연 이후엔 ~33 MB; macOS가 AppKit/popover state를 유지해 다시 여는 속도 즉시). 주간 차트가 필요 없고 옛 ~15 MB 풋프린트가 더 낫다면 이전 안정 릴리즈 [v0.2.1](https://github.com/WoojinAhn/CursorMeter/releases/tag/v0.2.1) 을 받으시면 됩니다.
 

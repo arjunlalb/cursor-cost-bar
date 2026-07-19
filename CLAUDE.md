@@ -85,6 +85,7 @@ Popover/Settings live checks run through `osascript` System Events — **element
 | `LogRedactor.swift` | Sensitive data redaction for logs |
 | `JumpEffectCoordinator.swift` | Observes `UsageViewModel.lastJump`, swaps `statusItem.button.image` to ⚡/🚀 emoji glyphs on tier 1/2; gates Bold + tier 2 system notification |
 | `ExternalURL.swift` | Host-validated wrapper around `NSWorkspace.open` for GitHub URLs derived from the Releases API |
+| `CursorActivityWatcher.swift` | Watches Cursor's conversation-search WAL (DispatchSource); debounced event-driven refresh trigger |
 
 ## Cursor API
 
