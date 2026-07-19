@@ -277,7 +277,7 @@ final class UsageViewModel {
     /// debounced, then deferred past a min-interval guard shared with every
     /// other refresh source. Defer — never drop — so a burst always lands.
     var activityRefreshEnabled = true
-    @ObservationIgnored internal var activityDebounceInterval: Duration = .seconds(20)
+    @ObservationIgnored internal var activityDebounceInterval: Duration = .seconds(5)
     @ObservationIgnored internal var activityMinRefreshInterval: Duration = .seconds(60)
     @ObservationIgnored private var activityDebounceTask: Task<Void, Never>?
     @ObservationIgnored private var activityGeneration = 0
