@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     private var eventMonitor: Any?
     private var popoverDismissMonitor: Any?
     private var jumpCoordinator: JumpEffectCoordinator?
+    private var activityWatcher: CursorActivityWatcher?
     private let notificationManager = NotificationManager()
 
     // MARK: - NSApplicationDelegate Entry Point
@@ -77,6 +78,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         observeStatusItem()
         observePopover()
         observeSettings()
+
+        activityWatcher = CursorActivityWatcher { [weak self] in
+            self?.viewModel.noteActivity()
+        }
+        syncActivityWatcher()
+        observeActivityRefreshSetting()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -296,6 +303,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
                 guard let self else { return }
                 (self.settingsWindow?.contentViewController as? SettingsViewController)?.updateUI()
                 self.observeSettings()
+            }
+        }
+    }
+
+    // #92: activity-driven refresh. The watcher's lifecycle follows the toggle;
+    // start()/stop() are idempotent so this can run on every setting change.
+    private func syncActivityWatcher() {
+        if viewModel.activityRefreshEnabled {
+            activityWatcher?.start()
+        } else {
+            activityWatcher?.stop()
+        }
+    }
+
+    private func observeActivityRefreshSetting() {
+        withObservationTracking {
+            _ = viewModel.activityRefreshEnabled
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.syncActivityWatcher()
+                self.observeActivityRefreshSetting()
             }
         }
     }

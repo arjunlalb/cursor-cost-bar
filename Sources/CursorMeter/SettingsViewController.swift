@@ -18,6 +18,7 @@ final class SettingsViewController: NSViewController {
     private var authSourceLabel = NSTextField(labelWithString: "")
     private var thresholdBox = NSView()
     private var thresholdSlider = ThresholdRangeSlider()
+    private var activityRefreshToggle = NSSwitch()
     private var menuBarDisplayPopUp = NSPopUpButton()
     private var jumpEffectToggle = NSButton()
     private var jumpIntensitySegmented = NSSegmentedControl()
@@ -163,6 +164,9 @@ final class SettingsViewController: NSViewController {
             critical: viewModel.criticalThreshold
         )
 
+        // Activity-driven refresh
+        activityRefreshToggle.state = viewModel.activityRefreshEnabled ? .on : .off
+
         // Menu bar display mode
         let percentOnly = viewModel.usageData?.isPercentOnly == true
         if percentOnly {
@@ -222,7 +226,23 @@ final class SettingsViewController: NSViewController {
         ])
         row.orientation = .horizontal
         row.spacing = 8
-        return row
+
+        activityRefreshToggle = NSSwitch()
+        activityRefreshToggle.target = self
+        activityRefreshToggle.action = #selector(activityRefreshToggleChanged)
+        activityRefreshToggle.state = viewModel.activityRefreshEnabled ? .on : .off
+
+        let activityLabel = makeLabel("Refresh on Cursor activity")
+        let activityRow = NSStackView(views: [activityLabel, makeSpacer(), activityRefreshToggle])
+        activityRow.orientation = .horizontal
+        activityRow.spacing = 8
+        activityRow.alignment = .centerY
+
+        let stack = NSStackView(views: [row, activityRow])
+        stack.orientation = .vertical
+        stack.alignment = .left
+        stack.spacing = 6
+        return stack
     }
 
     private func makeNotificationsSection() -> NSView {
@@ -488,6 +508,10 @@ final class SettingsViewController: NSViewController {
         let index = intervalPopUp.indexOfSelectedItem
         guard index >= 0, index < RefreshInterval.allCases.count else { return }
         viewModel.setRefreshInterval(RefreshInterval.allCases[index])
+    }
+
+    @objc private func activityRefreshToggleChanged() {
+        viewModel.setActivityRefreshEnabled(activityRefreshToggle.state == .on)
     }
 
     @objc private func notificationToggleChanged() {
