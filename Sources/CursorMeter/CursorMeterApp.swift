@@ -5,14 +5,14 @@ import AppKit
 
 @main
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNotificationCenterDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate, UNUserNotificationCenterDelegate {
 
     // MARK: - Properties
 
     private var viewModel = UsageViewModel()
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
-    private var settingsWindow: NSWindow?
+    private(set) var settingsWindow: NSWindow?
     private var loginWindow: LoginWindow?
     private var eventMonitor: Any?
     private var popoverDismissMonitor: Any?
@@ -220,11 +220,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         window.title = "Settings"
         window.styleMask = [.titled, .closable, .miniaturizable]
         window.isReleasedWhenClosed = false
+        window.delegate = self
         window.center()
         settingsWindow = window
 
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // #93: drop the strong reference on close so ARC tears down the whole
+    // window + VC graph (~12 MB retained otherwise; reopen builds fresh anyway).
+    // Detaching the content VC matters too: AppKit's last-key-window bookkeeping
+    // can hold the closed window shell until another window becomes key, and the
+    // heavy view tree must not ride along on that reference.
+    func windowWillClose(_ notification: Notification) {
+        guard let closing = notification.object as? NSWindow, closing === settingsWindow else { return }
+        settingsWindow = nil
+        closing.contentViewController = nil
     }
 
     // MARK: - Login Window
