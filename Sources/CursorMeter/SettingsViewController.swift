@@ -238,7 +238,11 @@ final class SettingsViewController: NSViewController {
         activityRow.spacing = 8
         activityRow.alignment = .centerY
 
-        let stack = NSStackView(views: [row, activityRow])
+        let activityCaption = makeLabel("Refreshes ~1 min after Cursor use; Interval is the fallback.")
+        activityCaption.font = NSFont.systemFont(ofSize: 11)
+        activityCaption.textColor = .secondaryLabelColor
+
+        let stack = NSStackView(views: [row, activityRow, activityCaption])
         stack.orientation = .vertical
         stack.alignment = .left
         stack.spacing = 6
