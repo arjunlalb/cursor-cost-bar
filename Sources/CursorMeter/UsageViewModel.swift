@@ -31,6 +31,7 @@ private enum SettingsKey: String {
     case sessionExpiryHistory
     case ideAuthSuppressed
     case browserLoginEnabled
+    case activityRefreshEnabled
     // Legacy keys consulted only by `loadSettings` migration block.
     case legacyShowMenuBarText = "showMenuBarText"
     case legacyShowMenuBarPercent = "showMenuBarPercent"
@@ -272,6 +273,16 @@ final class UsageViewModel {
     @ObservationIgnored internal var watchTickInterval: Duration = .seconds(3)
     @ObservationIgnored internal var watchTimeout: Duration = .seconds(60)
 
+    /// Event-driven refresh (#92): activity from CursorActivityWatcher is
+    /// debounced, then deferred past a min-interval guard shared with every
+    /// other refresh source. Defer — never drop — so a burst always lands.
+    var activityRefreshEnabled = true
+    @ObservationIgnored internal var activityDebounceInterval: Duration = .seconds(20)
+    @ObservationIgnored internal var activityMinRefreshInterval: Duration = .seconds(60)
+    @ObservationIgnored private var activityDebounceTask: Task<Void, Never>?
+    @ObservationIgnored private var activityGeneration = 0
+    @ObservationIgnored private var lastRefreshAttempt: ContinuousClock.Instant?
+
     /// Two separate monotonic tokens (codex review): sharing one would let a
     /// routine availability probe (every login-layout render) invalidate an
     /// active watch.
@@ -484,6 +495,7 @@ final class UsageViewModel {
 
     func refresh() async {
         guard !isRefreshing else { return }
+        lastRefreshAttempt = ContinuousClock.now
         isRefreshing = true
         isLoading = true
         errorMessage = nil
@@ -970,6 +982,27 @@ final class UsageViewModel {
         }
     }
 
+    /// Trailing-edge debounce + shared min-interval guard (defer semantics).
+    func noteActivity() {
+        guard activityRefreshEnabled else { return }
+        activityDebounceTask?.cancel()
+        let generation = activityGeneration
+        activityDebounceTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: self.activityDebounceInterval)
+            guard !Task.isCancelled, generation == self.activityGeneration else { return }
+            if let last = self.lastRefreshAttempt {
+                let remaining = self.activityMinRefreshInterval - last.duration(to: ContinuousClock.now)
+                if remaining > .zero {
+                    try? await Task.sleep(for: remaining)
+                    guard !Task.isCancelled, generation == self.activityGeneration else { return }
+                }
+            }
+            self.activityDebounceTask = nil
+            await self.refresh()
+        }
+    }
+
     func logout() {
         // Stop the sign-in watch and invalidate pending provider reads AND
         // any in-flight launch completion — a late result must not reconnect
@@ -1082,6 +1115,16 @@ final class UsageViewModel {
     func setWeeklyChartStyle(_ style: WeeklyChartStyle) {
         weeklyChartStyle = style
         UserDefaults.standard.set(style.rawValue, for: .weeklyChartStyle)
+    }
+
+    func setActivityRefreshEnabled(_ enabled: Bool) {
+        activityRefreshEnabled = enabled
+        UserDefaults.standard.set(enabled, for: .activityRefreshEnabled)
+        if !enabled {
+            activityGeneration += 1
+            activityDebounceTask?.cancel()
+            activityDebounceTask = nil
+        }
     }
 
     func checkForUpdate() async {
@@ -1201,6 +1244,9 @@ final class UsageViewModel {
         }
         if let val = defaults.object(for: .browserLoginEnabled) as? Bool {
             browserLoginEnabled = val
+        }
+        if let enabled = defaults.object(for: .activityRefreshEnabled) as? Bool {
+            activityRefreshEnabled = enabled
         }
     }
 
