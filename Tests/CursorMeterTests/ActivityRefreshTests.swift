@@ -64,14 +64,47 @@ final class ActivityRefreshTests: XCTestCase {
     func testGuardDefersButNeverDrops() async {
         let counter = RequestCounter()
         let vm = makeViewModel(counting: counter)
+        vm.activityMinRefreshInterval = .milliseconds(400)  // wide guard: mid-flight margin survives slow CI
         await vm.refresh()                       // any-source refresh stamps the guard
         XCTAssertEqual(counter.count, 1)
 
-        vm.noteActivity()                        // debounce 30ms < guard 150ms
-        try? await Task.sleep(for: .milliseconds(60))
+        vm.noteActivity()                        // debounce 30ms < guard 400ms
+        try? await Task.sleep(for: .milliseconds(150))
         XCTAssertEqual(counter.count, 1)         // deferred: not fired early...
         await waitUntil { counter.count >= 2 }
         XCTAssertEqual(counter.count, 2)         // ...and not dropped
+    }
+
+    /// Finding 1 regression: an interleaved direct refresh during the deferred
+    /// wait re-stamps the guard, and the deferred fire must recompute against
+    /// the fresh window rather than firing immediately after its original sleep.
+    func testDeferredRefreshRecomputesGuardAcrossInterleavedRefresh() async {
+        let counter = RequestCounter()
+        let vm = makeViewModel(counting: counter)
+        vm.activityDebounceInterval = .milliseconds(20)
+        vm.activityMinRefreshInterval = .milliseconds(400)
+
+        await vm.refresh()                 // count 1, stamps the guard at t0
+        XCTAssertEqual(counter.count, 1)
+
+        vm.noteActivity()                  // deferred: debounce 20ms, then guard ~380ms
+
+        // Mid-flight, re-stamp the guard with a direct refresh (t≈150). This
+        // opens a fresh 400ms window the deferred fire must honor.
+        try? await Task.sleep(for: .milliseconds(150))
+        await vm.refresh()
+        XCTAssertEqual(counter.count, 2)
+
+        // Original window (t0 + 400 ≈ 400) has passed, but the recomputed
+        // window (t≈150 + 400 ≈ 550) has not — the deferred fire stays parked.
+        try? await Task.sleep(for: .milliseconds(200))   // now ≈ t=350
+        XCTAssertEqual(counter.count, 2)
+
+        // Past the recomputed window it fires exactly once (defer-not-drop).
+        await waitUntil { counter.count >= 3 }
+        XCTAssertEqual(counter.count, 3)
+        try? await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(counter.count, 3)
     }
 
     func testToggleOffCancelsPendingDebounce() async {

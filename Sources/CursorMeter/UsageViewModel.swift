@@ -991,12 +991,16 @@ final class UsageViewModel {
             guard let self else { return }
             try? await Task.sleep(for: self.activityDebounceInterval)
             guard !Task.isCancelled, generation == self.activityGeneration else { return }
-            if let last = self.lastRefreshAttempt {
+            // Recompute the guard window after every sleep: an interleaved
+            // refresh (timer/manual/retry) can re-stamp lastRefreshAttempt while
+            // this task sleeps, opening a fresh min-interval window the deferred
+            // fire must respect — otherwise the "at most 1 refresh/min" ceiling
+            // breaks. Keep sleeping while a positive remainder persists.
+            while let last = self.lastRefreshAttempt {
                 let remaining = self.activityMinRefreshInterval - last.duration(to: ContinuousClock.now)
-                if remaining > .zero {
-                    try? await Task.sleep(for: remaining)
-                    guard !Task.isCancelled, generation == self.activityGeneration else { return }
-                }
+                guard remaining > .zero else { break }
+                try? await Task.sleep(for: remaining)
+                guard !Task.isCancelled, generation == self.activityGeneration else { return }
             }
             self.activityDebounceTask = nil
             await self.refresh()
