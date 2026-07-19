@@ -82,28 +82,30 @@ final class ActivityRefreshTests: XCTestCase {
         let counter = RequestCounter()
         let vm = makeViewModel(counting: counter)
         vm.activityDebounceInterval = .milliseconds(20)
-        vm.activityMinRefreshInterval = .milliseconds(400)
+        vm.activityMinRefreshInterval = .milliseconds(500)
 
         await vm.refresh()                 // count 1, stamps the guard at t0
         XCTAssertEqual(counter.count, 1)
 
-        vm.noteActivity()                  // deferred: debounce 20ms, then guard ~380ms
+        vm.noteActivity()                  // deferred: debounce 20ms, then guard ~480ms
 
-        // Mid-flight, re-stamp the guard with a direct refresh (t≈150). This
-        // opens a fresh 400ms window the deferred fire must honor.
-        try? await Task.sleep(for: .milliseconds(150))
+        // Mid-flight, re-stamp the guard with a direct refresh (t≈250). This
+        // opens a fresh 500ms window (recomputed fire ≈ t750). The pre-fix
+        // single-`if` code ignores this re-stamp and still fires at ≈ t500.
+        try? await Task.sleep(for: .milliseconds(250))
         await vm.refresh()
         XCTAssertEqual(counter.count, 2)
 
-        // Original window (t0 + 400 ≈ 400) has passed, but the recomputed
-        // window (t≈150 + 400 ≈ 550) has not — the deferred fire stays parked.
-        try? await Task.sleep(for: .milliseconds(200))   // now ≈ t=350
+        // Discriminating assertion — INSIDE the (t500, t750) gap. Pre-fix code
+        // has already fired here (count would be 3); the recomputed guard has
+        // not (count 2). ~125ms margin on each side for CI slack.
+        try? await Task.sleep(for: .milliseconds(375))   // now ≈ t=625
         XCTAssertEqual(counter.count, 2)
 
         // Past the recomputed window it fires exactly once (defer-not-drop).
         await waitUntil { counter.count >= 3 }
         XCTAssertEqual(counter.count, 3)
-        try? await Task.sleep(for: .milliseconds(200))
+        try? await Task.sleep(for: .milliseconds(250))
         XCTAssertEqual(counter.count, 3)
     }
 
