@@ -33,18 +33,34 @@ query in Cursor IDE, without increasing steady-state API traffic.
   close fd, retry-open on a short delay (a few attempts, then fall back
   to watching the parent `globalStorage` directory until the file
   reappears, then re-attach to the file).
-- Path missing at startup (Cursor not installed / moved): do not start;
+- WAL missing at startup is a **normal state** (SQLite deletes the WAL
+  on clean close), not just "Cursor not installed": apply the same
+  parent-directory fallback — watch `globalStorage/` until the WAL
+  appears, then attach. Only when the parent directory itself is absent
+  (Cursor not installed / moved) does the watcher stay off entirely;
   log one line; timer-only behavior is unchanged.
-- Decoupled from `UsageViewModel`: emits via an injected
-  `onActivity: () -> Void` closure. Watched path is injectable for tests.
+- Event and cancel handlers run on `DispatchQueue.main`
+  (`makeFileSystemObjectSource(..., queue: .main)`) and hop into the
+  actor via `MainActor.assumeIsolated`. The callback is typed
+  `onActivity: @MainActor () -> Void`. No other queues involved —
+  keeps Swift 6 strict concurrency clean.
+- Decoupled from `UsageViewModel`: emits via the injected `onActivity`
+  closure. Watched path is injectable for tests.
 
 ### `UsageViewModel` integration
 
 - `onActivity` → debounce **20 s** (trailing edge: bursts during a long
   agent session collapse to one refresh 20 s after the last event).
-- Min-interval guard **60 s** between event-driven refreshes, so a
-  continuously active agent session costs at most 1 refresh/min.
-  Timestamps use `ContinuousClock` (existing convention).
+- Min-interval guard **60 s**, measured against the last refresh
+  **attempt from any source** (timer, manual, network retry, or
+  event-driven) — `refresh()` itself only guards concurrent execution
+  (`isRefreshing`, `UsageViewModel.swift:485`), so the rate cap lives
+  here. Semantics are **defer, not drop**: if the debounce fires inside
+  the guard window, schedule one trailing refresh for the moment the
+  window expires (coalescing with any further events); an activity
+  burst is never silently lost. Net effect: at most 1 refresh/min
+  regardless of how refresh sources interleave. Timestamps use
+  `ContinuousClock` (existing convention).
 - Existing 5-min polling loop (`startAutoRefresh`) stays as fallback.
 - Debounce/guard values are internal constants, exposed as
   `@ObservationIgnored internal var` seams for tests (same pattern as
@@ -55,6 +71,10 @@ query in Cursor IDE, without increasing steady-state API traffic.
 - One toggle in the Settings window: "Refresh on Cursor activity",
   default **ON**, persisted via `UserDefaults` (existing
   `SettingsKey` enum pattern). Toggling stops/starts the watcher live.
+- Toggle OFF cancels the watcher source **and** any pending debounce /
+  deferred-refresh task, and bumps a generation token so an in-flight
+  callback from the old generation is ignored (same pattern as
+  `ideWatchGeneration`). Nothing event-driven fires after OFF.
 
 ### Error handling
 
@@ -72,14 +92,22 @@ query in Cursor IDE, without increasing steady-state API traffic.
 
 ## Testing
 
-Core logic only, real FS via temp dirs (no Cursor path in tests):
+Core logic only, real FS via temp dirs (no Cursor path in tests).
+Timing: no simulated clock — tests inject **shortened durations**
+(tens of ms) through the `@ObservationIgnored` seams and assert on
+refresh *counts* after convergence, the same approach the existing
+suite uses for `watchTickInterval`. No wall-clock assertions.
 
 1. Debounce: N rapid file writes → exactly one `onActivity`-driven refresh.
-2. Min-interval guard: two bursts 30 s apart (simulated clock) → second
-   refresh suppressed until 60 s elapsed.
+2. Min-interval guard, defer semantics: burst inside the guard window →
+   exactly one trailing refresh after the window expires (not zero —
+   verifies defer-not-drop; shared guard covers a timer-sourced refresh
+   immediately preceding the burst).
 3. WAL lifecycle: delete + recreate watched file → events still delivered.
-4. Missing path: watcher start is a no-op, no crash, no refresh.
-5. Settings toggle OFF → watcher stopped, no event-driven refreshes.
+4. WAL absent at start, parent dir present → watcher attaches once the
+   file appears; parent dir absent → start is a no-op, no crash.
+5. Settings toggle OFF with a pending debounce → debounce cancelled,
+   zero refreshes fire afterward.
 
 Constraints honored: Swift 6 strict concurrency, zero external
 dependencies, no Keychain/UNUserNotificationCenter in tests.
