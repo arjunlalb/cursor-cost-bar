@@ -82,11 +82,6 @@ swift test    # Run all tests (requires Xcode)
 
 This app uses several of Cursor's **undocumented internal endpoints** (usage, auth, and dashboard APIs — see [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) for the full list). These endpoints may change or be blocked at any time without notice.
 
-## Roadmap
-
-- [ ] Visual mode indicator on weekly chart bars ([#69](https://github.com/WoojinAhn/CursorMeter/issues/69))
-- [ ] Billing-cycle rollover marker on weekly chart ([#70](https://github.com/WoojinAhn/CursorMeter/issues/70))
-
 ## Contributing
 
 Found a bug or have an idea? [Open an issue](https://github.com/WoojinAhn/CursorMeter/issues) — feedback and suggestions are always welcome. Pull requests are not accepted at this time.
