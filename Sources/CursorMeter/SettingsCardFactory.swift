@@ -7,7 +7,7 @@ import AppKit
 @MainActor
 enum SettingsCardFactory {
 
-    static let contentWidth: CGFloat = 420
+    static let contentWidth: CGFloat = 440
 
     // MARK: Section
 
@@ -98,7 +98,7 @@ enum SettingsCardFactory {
         let textStack = NSStackView(views: [titleLabel])
         textStack.orientation = .vertical
         textStack.alignment = .leading
-        textStack.spacing = 2
+        textStack.spacing = 3
         if let caption {
             textStack.addArrangedSubview(makeCaption(caption))
         }
@@ -110,7 +110,10 @@ enum SettingsCardFactory {
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 12
-        row.edgeInsets = NSEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
+        // Captioned rows breathe a little more — a wrapped caption against
+        // a 10 pt bottom edge reads cramped (#101).
+        let vPad: CGFloat = caption == nil ? 10 : 12
+        row.edgeInsets = NSEdgeInsets(top: vPad, left: 14, bottom: vPad, right: 14)
         return row
     }
 
@@ -138,7 +141,12 @@ enum SettingsCardFactory {
         label.textColor = .secondaryLabelColor
         label.isSelectable = false
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        label.preferredMaxLayoutWidth = 260
+        // Must stay ≤ the real available width or long captions CLIP instead
+        // of wrapping: intrinsic height is computed at this width, so a value
+        // above the layout width yields a 1-line intrinsic that then gets
+        // compressed. Available: contentWidth 440 − root insets 36 − row
+        // insets 28 − spacing 12 − NSSwitch ≈ 54 → ≈ 310 (#101).
+        label.preferredMaxLayoutWidth = 300
         return label
     }
 
