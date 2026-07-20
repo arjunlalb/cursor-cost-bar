@@ -22,7 +22,7 @@ final class SettingsNotificationsTabViewController: NSViewController {
     init(viewModel: UsageViewModel) {
         self.viewModel = viewModel
         super.init(nibName: nil, bundle: nil)
-        title = "Notifications"
+        title = "Alerts"
     }
 
     @available(*, unavailable)

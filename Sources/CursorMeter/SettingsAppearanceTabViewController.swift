@@ -28,7 +28,7 @@ final class SettingsAppearanceTabViewController: NSViewController {
     init(viewModel: UsageViewModel) {
         self.viewModel = viewModel
         super.init(nibName: nil, bundle: nil)
-        title = "Appearance"
+        title = "Display"
     }
 
     @available(*, unavailable)
