@@ -220,9 +220,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             return
         }
 
-        let settingsVC = SettingsViewController(viewModel: viewModel)
+        let settingsVC = SettingsTabViewController(viewModel: viewModel)
         let window = NSWindow(contentViewController: settingsVC)
-        window.title = "Settings"
+        // No manual title: the toolbar-style tab controller propagates the
+        // selected tab's title, and AppKit owns window.toolbar (#99).
         window.styleMask = [.titled, .closable, .miniaturizable]
         window.isReleasedWhenClosed = false
         window.delegate = self
@@ -318,7 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                (self.settingsWindow?.contentViewController as? SettingsViewController)?.updateUI()
+                (self.settingsWindow?.contentViewController as? SettingsTabViewController)?.updateUI()
                 self.observeSettings()
             }
         }
