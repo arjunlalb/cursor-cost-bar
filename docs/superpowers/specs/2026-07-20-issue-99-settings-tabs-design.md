@@ -49,9 +49,11 @@ mockup; user approved 2026-07-20).
 | Appearance | `paintbrush` | Menu Bar text mode · Usage Jump (toggle, intensity, style) · Weekly Chart (toggle, today style) |
 
 - Per-tab window resize policy: the window re-fits **only on tab
-  switch** (AppKit animates to the selected child's fitting size —
-  each child view hugs its content via Auto Layout, no manual
-  `preferredContentSize` bookkeeping). Conditional hide/show *within*
+  switch**. NSTabViewController animates only to the selected child's
+  `preferredContentSize` and never reads fitting sizes itself, so each
+  child reports `preferredContentSize = view.fittingSize` in
+  `viewWillAppear()` — this bookkeeping is load-bearing, do not remove
+  it in a cleanup. Conditional hide/show *within*
   a tab (threshold card, jump sub-rows, weekly chart) re-lays out
   inside the current window height without resizing the window — same
   behavior as today's single pane.
@@ -126,9 +128,10 @@ across tabs):
 + `contentViewController` detach in `windowWillClose`. The tab
 controller (holding 3 children) is the new "heavy view tree" — the
 teardown path must release it exactly as it releases the current VC.
-No existing tests cover the #93 lifecycle (verified 2026-07-20 —
-`Tests/` has no `SettingsViewController` references), so there is
-nothing to update there; the release check stays manual (Verification).
+`Tests/CursorMeterTests/SettingsWindowLifecycleTests.swift` covers this
+lifecycle generically via `openSettings()` + `contentViewController`
+(no controller-type literal — an earlier draft of this spec missed it
+for that reason), so it gates the new tab controller with no changes.
 
 ## Out of scope
 
