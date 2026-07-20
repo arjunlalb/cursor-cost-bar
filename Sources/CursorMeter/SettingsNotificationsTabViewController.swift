@@ -41,6 +41,14 @@ final class SettingsNotificationsTabViewController: NSViewController {
         updateUI()
     }
 
+    // NSTabViewController animates the window to the selected child's
+    // preferredContentSize on tab switch — it does NOT read fitting sizes
+    // by itself. Report ours each time this tab is about to show.
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        preferredContentSize = view.fittingSize
+    }
+
     // MARK: - Public API
 
     func updateUI() {
