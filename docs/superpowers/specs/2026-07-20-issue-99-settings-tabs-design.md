@@ -28,10 +28,19 @@ mockup; user approved 2026-07-20).
 
 ### 1. Window structure — `NSTabViewController`
 
-- `SettingsTabViewController: NSTabViewController` (new file), 
-  `tabStyle = .toolbar`. It becomes the settings window's
-  `contentViewController` in `CursorMeterApp.openSettings()`.
-- Three tab items, each an `NSViewController` child:
+- `SettingsTabViewController: NSTabViewController` (new file,
+  `@MainActor`), `tabStyle = .toolbar`. It becomes the settings
+  window's `contentViewController` in `CursorMeterApp.openSettings()`
+  via the existing `NSWindow(contentViewController:)` path.
+  `openSettings()` stops setting `window.title` manually (title comes
+  from tab propagation, below) and never touches `window.toolbar` —
+  AppKit installs and owns the toolbar for a toolbar-style tab
+  controller. `styleMask` keeps `[.titled, .closable, .miniaturizable]`.
+- All three children are **eager-loaded** at construction (views are
+  small; #93 frees the whole graph on close), so `updateUI()` fan-out
+  and per-tab fitting sizes never hit an unloaded child.
+- Three tab items, each an `NSViewController` child (`@MainActor`, as
+  is every new class here that touches AppKit or `UsageViewModel`):
 
 | Tab | SF Symbol | Sections |
 |-----|-----------|----------|
@@ -39,9 +48,13 @@ mockup; user approved 2026-07-20).
 | Notifications | `bell.badge` | Usage alerts master toggle · threshold range slider card · app status notifications |
 | Appearance | `paintbrush` | Menu Bar text mode · Usage Jump (toggle, intensity, style) · Weekly Chart (toggle, today style) |
 
-- Per-tab window resize: AppKit animates the frame when child
-  `preferredContentSize`/fitting sizes differ — no custom code beyond
-  setting each child's view to hug its content.
+- Per-tab window resize policy: the window re-fits **only on tab
+  switch** (AppKit animates to the selected child's fitting size —
+  each child view hugs its content via Auto Layout, no manual
+  `preferredContentSize` bookkeeping). Conditional hide/show *within*
+  a tab (threshold card, jump sub-rows, weekly chart) re-lays out
+  inside the current window height without resizing the window — same
+  behavior as today's single pane.
 - Window title follows the selected tab
   (`canPropagateSelectedChildViewControllerTitle = true`, child
   `title` = tab label). System Settings convention.
@@ -69,9 +82,16 @@ across tabs):
 
 ### 3. State & behavior — unchanged by contract
 
-- All control instance variables, `@objc` action selectors, and
-  `updateUI()` logic are preserved. This change is layout-only; no
-  persistence, no ViewModel, no API changes.
+- **Behavior preserved, ownership redistributed**: control instance
+  variables, `@objc` action selectors, and `updateUI()` logic keep
+  their semantics but move into the child VC that owns each section.
+  No persistence, ViewModel, or API changes.
+- External call site: `observeSettings()` in `CursorMeterApp` casts
+  `settingsWindow?.contentViewController as? SettingsViewController` —
+  this cast changes to `SettingsTabViewController`. Its observation
+  scope (`activeAuthSource` only, #54 push signal) is **unchanged**;
+  widening it (e.g. `isEnterpriseTeam`, update-check state) is out of
+  scope for this layout-only issue.
 - `NSTabViewController` instantiates all children up front (or on first
   display); `updateUI()` must keep working regardless of which tab is
   frontmost. Ownership: **each child VC owns its controls and its own
@@ -80,16 +100,25 @@ across tabs):
   (`CursorMeterApp` observation tracking) keep calling the single
   public entry point, same behavior as today.
 - Conditional visibility carried over:
-  - Weekly Chart card + its header hide entirely when
-    `!viewModel.isEnterpriseTeam` (wrap header+card in one container).
-  - Jump sub-rows (`Intensity`, `Style`) hide when the jump toggle is
-    off — inside a card this collapses rows; card must re-layout
-    without artifacts (same `isHidden` on the row views inside the
-    card's stack).
+  - Weekly Chart hides entirely when `!viewModel.isEnterpriseTeam`.
+    The hidden unit is one container wrapping **section header +
+    card** (no separators exist between card sections; stack spacing
+    collapses with the container). Cards never contain separators
+    above/below themselves, unlike the current `weeklyChartSection`
+    which bundles its own separator.
+  - Jump sub-rows (`Intensity`, `Style`) keep the current
+    **single-container collapse**: both rows stay wrapped in
+    `jumpSubRowsContainer` inside the card and only the container's
+    `isHidden` flips — per-row hiding is explicitly rejected (the
+    container exists to avoid NSStackView mid-animation spacing
+    thrash; see the ivar comment). No `animator().isHidden`.
   - Threshold card hides when usage alerts are off.
   - `percentOnly` still disables the Ratio menu item.
-- Threshold slider keeps the full-width pinning fix from #75 — the
-  full-width card row replaces the manual leading/trailing constraints.
+- Threshold slider keeps the full-width pinning fix from #75.
+  Acceptance criterion: the full-width card row pins the slider to the
+  card's content leading/trailing anchors, and after the master toggle
+  cycles `isHidden` the row settles back at full card width, not its
+  intrinsic minimum (the #75 regression mode).
 
 ### 4. Window lifecycle (#93 preservation)
 
@@ -97,8 +126,9 @@ across tabs):
 + `contentViewController` detach in `windowWillClose`. The tab
 controller (holding 3 children) is the new "heavy view tree" — the
 teardown path must release it exactly as it releases the current VC.
-`window.styleMask` needs no manual toolbar flag; setting a toolbar-style
-tab controller as content installs the toolbar.
+No existing tests cover the #93 lifecycle (verified 2026-07-20 —
+`Tests/` has no `SettingsViewController` references), so there is
+nothing to update there; the release check stays manual (Verification).
 
 ## Out of scope
 
