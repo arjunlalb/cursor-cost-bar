@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>#99 Settings layout — Current vs A/B/C</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a1c;
+    color: #ddd;
+    font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
+    padding: 32px;
+  }
+  h1 { font-size: 20px; margin-bottom: 6px; }
+  .sub { color: #888; font-size: 13px; margin-bottom: 28px; }
+  .grid { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+  .col { width: 400px; }
+  .col > h2 { font-size: 15px; margin-bottom: 4px; }
+  .col > p { font-size: 12px; color: #999; margin-bottom: 12px; line-height: 1.5; min-height: 54px; }
+  .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px; margin-left: 6px; vertical-align: 2px; }
+  .badge.cur { background: #444; color: #bbb; }
+  .badge.a { background: #2456c9; color: #fff; }
+  .badge.b { background: #6a4fc9; color: #fff; }
+  .badge.c { background: #2e7d4f; color: #fff; }
+
+  /* ---- fake macOS window ---- */
+  .win {
+    background: #28282a;
+    border: 1px solid #3a3a3c;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 12px 32px rgba(0,0,0,.5);
+  }
+  .titlebar {
+    background: #313134;
+    padding: 10px 12px 8px;
+    border-bottom: 1px solid #202022;
+  }
+  .dots { display: flex; gap: 7px; margin-bottom: 2px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .dot.r { background: #ff5f57; } .dot.y { background: #febc2e; } .dot.g { background: #57575a; }
+  .titlebar .title { text-align: center; font-size: 13px; font-weight: 600; color: #ccc; margin-top: -14px; }
+
+  /* toolbar tabs (A, B) */
+  .tabs {
+    display: flex; justify-content: center; gap: 6px;
+    padding: 8px 0 10px;
+  }
+  .tab {
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    font-size: 11px; color: #9a9a9e;
+    padding: 4px 14px; border-radius: 6px;
+  }
+  .tab .ico { font-size: 17px; }
+  .tab.active { background: #3f3f43; color: #fff; }
+
+  .body { padding: 16px; }
+  .body.tall { max-height: none; }
+
+  /* ---- current row style (Current, B) ---- */
+  .flat .sec-h {
+    font-size: 11px; font-weight: 700; letter-spacing: .06em;
+    color: #8e8e93; text-transform: uppercase;
+    margin: 18px 0 10px;
+  }
+  .flat .sec-h:first-child { margin-top: 2px; }
+  .flat .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; font-size: 14px; }
+  .flat .row.left { justify-content: flex-start; gap: 10px; }
+  .flat .cap { font-size: 12px; color: #7c7c80; margin: -6px 0 12px; }
+  .flat hr { border: none; border-top: 1px solid #3a3a3c; margin: 4px 0 0; }
+
+  /* ---- card row style (A, C) ---- */
+  .cards .sec-h {
+    font-size: 12px; font-weight: 600; color: #9a9a9e;
+    margin: 20px 4px 8px;
+  }
+  .cards .sec-h:first-child { margin-top: 0; }
+  .card {
+    background: #313134;
+    border: 1px solid #3c3c3f;
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .crow {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; padding: 11px 14px;
+  }
+  .crow + .crow { border-top: 1px solid #3c3c3f; }
+  .crow .txt { flex: 1; min-width: 0; }
+  .crow .t { font-size: 13.5px; color: #eee; }
+  .crow .d { font-size: 11.5px; color: #8e8e93; margin-top: 2px; line-height: 1.4; }
+  .crow .ctrl { flex-shrink: 0; }
+  .crow.stack { flex-direction: column; align-items: stretch; gap: 10px; }
+
+  /* ---- controls ---- */
+  .switch { width: 40px; height: 24px; border-radius: 12px; background: #3478f6; position: relative; flex-shrink: 0; }
+  .switch::after { content:""; position: absolute; right: 2px; top: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; }
+  .switch.off { background: #55555a; }
+  .switch.off::after { right: auto; left: 2px; }
+  .popup {
+    background: #414146; border: 1px solid #505055; border-radius: 6px;
+    font-size: 12.5px; color: #eee; padding: 4px 22px 4px 10px; position: relative; display: inline-block;
+  }
+  .popup::after { content: "⌃⌄"; position: absolute; right: 6px; top: 3px; font-size: 8px; color: #aaa; letter-spacing: -3px; }
+  .seg { display: inline-flex; background: #414146; border-radius: 7px; padding: 2px; font-size: 12px; }
+  .seg span { padding: 3px 12px; border-radius: 5px; color: #ccc; }
+  .seg span.on { background: #3478f6; color: #fff; }
+  .check { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; }
+  .check .box { width: 15px; height: 15px; border-radius: 4px; background: #3478f6; color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; }
+  .check .box.off { background: #414146; border: 1px solid #58585c; }
+  .btn { background: #414146; border: 1px solid #505055; border-radius: 6px; font-size: 12.5px; color: #eee; padding: 4px 12px; display: inline-block; }
+  .slider-mock { padding: 4px 0 2px; }
+  .slider-track { height: 6px; border-radius: 3px; background: linear-gradient(90deg, #34a853 0%, #f2a93b 45%, #d9483b 80%, #d9483b 100%); position: relative; margin: 14px 4px 6px; }
+  .knob { position: absolute; top: -5px; width: 14px; height: 16px; border-radius: 4px; }
+  .knob.w { left: 43%; background: #f2a93b; }
+  .knob.c { left: 78%; background: #d9483b; }
+  .knob .lbl { position: absolute; top: -20px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 700; color: #fff; background: inherit; border-radius: 4px; padding: 1px 5px; white-space: nowrap; }
+  .legend { font-size: 11px; color: #999; display: flex; gap: 12px; margin-top: 4px; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; }
+  .footer-note { font-size: 12px; color: #7c7c80; }
+  .link { color: #4c8dff; }
+
+  .note { margin-top: 40px; max-width: 860px; font-size: 13px; color: #aaa; line-height: 1.7; }
+  .note b { color: #ddd; }
+</style>
+</head>
+<body>
+
+<h1>#99 Settings 레이아웃 — 현행 vs A / B / C</h1>
+<p class="sub">A·B는 탭 전환 후 <b>Appearance 탭</b>이 열린 상태 (Menu Bar + Usage Jump + Weekly Chart가 한 탭으로 묶임). C는 창 구조 유지.</p>
+
+<div class="grid">
+
+  <!-- ================= CURRENT ================= -->
+  <div class="col">
+    <h2>현행<span class="badge cur">단일 스크롤 · 7섹션</span></h2>
+    <p>UPPERCASE 헤더 + 좌측 정렬 행이 한 페이지에 전부 쌓임. 스크롤이 길고 컨트롤 정렬이 행마다 다름.</p>
+    <div class="win">
+      <div class="titlebar"><div class="dots"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div></div><div class="title">Settings</div></div>
+      <div class="body flat">
+        <div class="sec-h">Refresh</div>
+        <div class="row left"><span>Interval</span> <span class="popup">1 min</span></div>
+        <div class="row"><span>Refresh on Cursor activity</span><div class="switch"></div></div>
+        <div class="cap">Refreshes ~1 min after Cursor use; Interval is the fallback.</div>
+        <hr>
+        <div class="sec-h">Notifications</div>
+        <div class="row left"><span class="check"><span class="box">✓</span> Enable usage alerts</span></div>
+        <div class="slider-mock">
+          <div class="slider-track"><div class="knob w"><span class="lbl">W 45%</span></div><div class="knob c"><span class="lbl">C 80%</span></div></div>
+          <div class="legend"><span><i style="background:#34a853"></i>Normal</span><span><i style="background:#f2a93b"></i>Warning</span><span><i style="background:#d9483b"></i>Critical</span></div>
+        </div>
+        <div class="row left"><span class="check"><span class="box">✓</span> App status notifications (new version · errors)</span></div>
+        <hr>
+        <div class="sec-h">Menu Bar</div>
+        <div class="row left"><span>Usage text next to icon:</span></div>
+        <div class="row left"><span class="popup">Ratio (e.g. 120/500)</span></div>
+        <hr>
+        <div class="sec-h">Usage Jump</div>
+        <div class="row left"><span class="check"><span class="box">✓</span> Visual jump effect</span></div>
+        <div class="row left"><span>Intensity</span><span class="seg"><span>Quiet</span><span>Normal</span><span class="on">Bold</span></span></div>
+        <div class="row left"><span>Style</span><span class="seg"><span>⚡ 🚀</span><span class="on">$ 💸</span></span></div>
+        <div class="cap">Highlight sudden usage jumps in the menu bar.</div>
+        <hr>
+        <div class="sec-h">Weekly Chart</div>
+        <div class="row"><span>Show weekly chart</span><div class="switch"></div></div>
+        <div class="row left"><span>Today</span><span class="seg"><span>Outline</span><span>Dim</span><span class="on">Both</span></span></div>
+        <div class="cap">Rolling 7-day usage. Enterprise team accounts only.</div>
+        <hr>
+        <div class="sec-h">General</div>
+        <div class="row left"><span class="check"><span class="box">✓</span> Launch at login</span></div>
+        <div class="row left"><span class="check"><span class="box off"></span> Enable browser login</span></div>
+        <div class="cap">Deprecated — Cursor IDE connection is the supported sign-in path.</div>
+        <hr>
+        <div class="sec-h">Version</div>
+        <div class="row"><span>v0.1.0 · v0.8.0 new</span><span class="btn">Download</span></div>
+        <div class="footer-note">Auth: Cursor IDE<br>Made by WoojinAhn · <span class="link">GitHub ↗</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= OPTION A ================= -->
+  <div class="col">
+    <h2>A — 탭 + 카드 행<span class="badge a">구조 + 비주얼</span></h2>
+    <p>툴바 탭으로 3분할 + Cursor 스타일 카드 그룹. 행마다 제목+캡션, 컨트롤은 전부 우측 정렬. 체감 변화 최대.</p>
+    <div class="win">
+      <div class="titlebar">
+        <div class="dots"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div></div>
+        <div class="title">Appearance</div>
+        <div class="tabs">
+          <div class="tab"><span class="ico">⚙️</span>General</div>
+          <div class="tab"><span class="ico">🔔</span>Notifications</div>
+          <div class="tab active"><span class="ico">🎨</span>Appearance</div>
+        </div>
+      </div>
+      <div class="body cards">
+        <div class="sec-h">Menu Bar</div>
+        <div class="card">
+          <div class="crow">
+            <div class="txt"><div class="t">Usage text next to icon</div><div class="d">Shown beside the progress ring</div></div>
+            <div class="ctrl"><span class="popup">Ratio (e.g. 120/500)</span></div>
+          </div>
+        </div>
+        <div class="sec-h">Usage Jump</div>
+        <div class="card">
+          <div class="crow">
+            <div class="txt"><div class="t">Visual jump effect</div><div class="d">Highlight sudden usage jumps in the menu bar</div></div>
+            <div class="ctrl"><div class="switch"></div></div>
+          </div>
+          <div class="crow">
+            <div class="txt"><div class="t">Intensity</div></div>
+            <div class="ctrl"><span class="seg"><span>Quiet</span><span>Normal</span><span class="on">Bold</span></span></div>
+          </div>
+          <div class="crow">
+            <div class="txt"><div class="t">Style</div></div>
+            <div class="ctrl"><span class="seg"><span>⚡ 🚀</span><span class="on">$ 💸</span></span></div>
+          </div>
+        </div>
+        <div class="sec-h">Weekly Chart</div>
+        <div class="card">
+          <div class="crow">
+            <div class="txt"><div class="t">Show weekly chart</div><div class="d">Rolling 7-day usage. Enterprise team accounts only</div></div>
+            <div class="ctrl"><div class="switch"></div></div>
+          </div>
+          <div class="crow">
+            <div class="txt"><div class="t">Today style</div></div>
+            <div class="ctrl"><span class="seg"><span>Outline</span><span>Dim</span><span class="on">Both</span></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= OPTION B ================= -->
+  <div class="col">
+    <h2>B — 탭만<span class="badge b">구조만</span></h2>
+    <p>툴바 탭으로 3분할하되 행 디자인은 현행 그대로. diff 최소·안전한 1단계, 카드화는 후속 이슈로.</p>
+    <div class="win">
+      <div class="titlebar">
+        <div class="dots"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div></div>
+        <div class="title">Appearance</div>
+        <div class="tabs">
+          <div class="tab"><span class="ico">⚙️</span>General</div>
+          <div class="tab"><span class="ico">🔔</span>Notifications</div>
+          <div class="tab active"><span class="ico">🎨</span>Appearance</div>
+        </div>
+      </div>
+      <div class="body flat">
+        <div class="sec-h">Menu Bar</div>
+        <div class="row left"><span>Usage text next to icon:</span></div>
+        <div class="row left"><span class="popup">Ratio (e.g. 120/500)</span></div>
+        <hr>
+        <div class="sec-h">Usage Jump</div>
+        <div class="row left"><span class="check"><span class="box">✓</span> Visual jump effect</span></div>
+        <div class="row left"><span>Intensity</span><span class="seg"><span>Quiet</span><span>Normal</span><span class="on">Bold</span></span></div>
+        <div class="row left"><span>Style</span><span class="seg"><span>⚡ 🚀</span><span class="on">$ 💸</span></span></div>
+        <div class="cap">Highlight sudden usage jumps in the menu bar.</div>
+        <hr>
+        <div class="sec-h">Weekly Chart</div>
+        <div class="row"><span>Show weekly chart</span><div class="switch"></div></div>
+        <div class="row left"><span>Today</span><span class="seg"><span>Outline</span><span>Dim</span><span class="on">Both</span></span></div>
+        <div class="cap">Rolling 7-day usage. Enterprise team accounts only.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= OPTION C ================= -->
+  <div class="col">
+    <h2>C — 카드 행만<span class="badge c">비주얼만</span></h2>
+    <p>창 구조(단일 스크롤)는 유지하고 행만 카드화. 구조 리스크 없음, 대신 스크롤 길이 문제는 그대로.</p>
+    <div class="win">
+      <div class="titlebar"><div class="dots"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div></div><div class="title">Settings</div></div>
+      <div class="body cards">
+        <div class="sec-h">Refresh</div>
+        <div class="card">
+          <div class="crow">
+            <div class="txt"><div class="t">Interval</div></div>
+            <div class="ctrl"><span class="popup">1 min</span></div>
+          </div>
+          <div class="crow">
+            <div class="txt"><div class="t">Refresh on Cursor activity</div><div class="d">Refreshes ~1 min after Cursor use; Interval is the fallback</div></div>
+            <div class="ctrl"><div class="switch"></div></div>
+          </div>
+        </div>
+        <div class="sec-h">Notifications</div>
+        <div class="card">
+          <div class="crow">
+            <div class="txt"><div class="t">Usage alerts</div><div class="d">Warning / Critical thresholds below</div></div>
+            <div class="ctrl"><div class="switch"></div></div>
+          </div>
+          <div class="crow stack">
+            <div class="slider-mock">
+              <div class="slider-track"><div class="knob w"><span class="lbl">W 45%</span></div><div class="knob c"><span class="lbl">C 80%</span></div></div>
+              <div class="legend"><span><i style="background:#34a853"></i>Normal</span><span><i style="background:#f2a93b"></i>Warning</span><span><i style="background:#d9483b"></i>Critical</span></div>
+            </div>
+          </div>
+          <div class="crow">
+            <div class="txt"><div class="t">App status notifications</div><div class="d">New version · connection errors</div></div>
+            <div class="ctrl"><div class="switch"></div></div>
+          </div>
+        </div>
+        <div class="sec-h">Menu Bar</div>
+        <div class="card">
+          <div class="crow">
+            <div class="txt"><div class="t">Usage text next to icon</div></div>
+            <div class="ctrl"><span class="popup">Ratio (e.g. 120/500)</span></div>
+          </div>
+        </div>
+        <div class="sec-h">Usage Jump</div>
+        <div class="card">
+          <div class="crow">
+            <div class="txt"><div class="t">Visual jump effect</div><div class="d">Highlight sudden usage jumps in the menu bar</div></div>
+            <div class="ctrl"><div class="switch"></div></div>
+          </div>
+          <div class="crow">
+            <div class="txt"><div class="t">Intensity</div></div>
+            <div class="ctrl"><span class="seg"><span>Quiet</span><span>Normal</span><span class="on">Bold</span></span></div>
+          </div>
+          <div class="crow">
+            <div class="txt"><div class="t">Style</div></div>
+            <div class="ctrl"><span class="seg"><span>⚡ 🚀</span><span class="on">$ 💸</span></span></div>
+          </div>
+        </div>
+        <div class="sec-h">Weekly Chart</div>
+        <div class="card">
+          <div class="crow">
+            <div class="txt"><div class="t">Show weekly chart</div><div class="d">Rolling 7-day usage. Enterprise team accounts only</div></div>
+            <div class="ctrl"><div class="switch"></div></div>
+          </div>
+          <div class="crow">
+            <div class="txt"><div class="t">Today style</div></div>
+            <div class="ctrl"><span class="seg"><span>Outline</span><span>Dim</span><span class="on">Both</span></span></div>
+          </div>
+        </div>
+        <div class="sec-h">General</div>
+        <div class="card">
+          <div class="crow">
+            <div class="txt"><div class="t">Launch at login</div></div>
+            <div class="ctrl"><div class="switch"></div></div>
+          </div>
+          <div class="crow">
+            <div class="txt"><div class="t">Browser login</div><div class="d">Deprecated — Cursor IDE connection is the supported sign-in path</div></div>
+            <div class="ctrl"><div class="switch off"></div></div>
+          </div>
+        </div>
+        <div class="sec-h">Version</div>
+        <div class="card">
+          <div class="crow">
+            <div class="txt"><div class="t">v0.1.0 · v0.8.0 new</div><div class="d">Auth: Cursor IDE · Made by WoojinAhn · <span class="link">GitHub ↗</span></div></div>
+            <div class="ctrl"><span class="btn">Download</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="note">
+  <b>비교 포인트</b><br>
+  · <b>A vs B</b> — 같은 탭 구조에서 행 디자인 차이. A는 카드 경계·행 구분선·우측 정렬 컨트롤·행별 캡션, B는 현행 행 스타일 그대로.<br>
+  · <b>A vs C</b> — 같은 카드 디자인에서 창 구조 차이. A는 탭당 1~2스크린 분량으로 끝나고, C는 카드화해도 세로 스크롤이 현행만큼 김 (왼쪽 현행 창과 높이 비교).<br>
+  · 탭 구성(안): <b>General</b> = Refresh + Launch/Login + Version · <b>Notifications</b> = 알림 + 임계값 슬라이더 · <b>Appearance</b> = Menu Bar + Usage Jump + Weekly Chart.
+</div>
+
+</body>
+</html>
