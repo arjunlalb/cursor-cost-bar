@@ -90,6 +90,10 @@ enum SettingsCardFactory {
     // MARK: Rows
 
     /// Standard card row: title (+ optional caption) left, control trailing.
+    /// Built on explicit required constraints, not NSStackView edgeInsets —
+    /// the inset/centerY-alignment route rendered with the bottom padding
+    /// partially swallowed (#101); hard anchors make the padding and the
+    /// row's fitting height deterministic.
     static func makeCardRow(title: String, caption: String? = nil, control: NSView) -> NSView {
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 13)
@@ -106,15 +110,27 @@ enum SettingsCardFactory {
         control.setContentHuggingPriority(.required, for: .horizontal)
         control.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        let row = NSStackView(views: [textStack, makeSpacer(), control])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 12
+        let host = NSView()
+        host.translatesAutoresizingMaskIntoConstraints = false
+        textStack.translatesAutoresizingMaskIntoConstraints = false
+        control.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(textStack)
+        host.addSubview(control)
+
         // Captioned rows breathe a little more — a wrapped caption against
         // a 10 pt bottom edge reads cramped (#101).
         let vPad: CGFloat = caption == nil ? 10 : 12
-        row.edgeInsets = NSEdgeInsets(top: vPad, left: 14, bottom: vPad, right: 14)
-        return row
+        NSLayoutConstraint.activate([
+            textStack.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 14),
+            textStack.topAnchor.constraint(equalTo: host.topAnchor, constant: vPad),
+            textStack.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -vPad),
+            control.leadingAnchor.constraint(greaterThanOrEqualTo: textStack.trailingAnchor, constant: 12),
+            control.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -14),
+            control.centerYAnchor.constraint(equalTo: host.centerYAnchor),
+            control.topAnchor.constraint(greaterThanOrEqualTo: host.topAnchor, constant: 6),
+            control.bottomAnchor.constraint(lessThanOrEqualTo: host.bottomAnchor, constant: -6),
+        ])
+        return host
     }
 
     /// Wide content (e.g. the threshold slider) spanning the card width.
@@ -122,17 +138,17 @@ enum SettingsCardFactory {
     /// cycles, the content settles back at full card width, never its
     /// intrinsic minimum.
     static func makeFullWidthCardRow(_ content: NSView) -> NSView {
-        let row = NSStackView(views: [content])
-        row.orientation = .vertical
-        row.alignment = .leading
-        row.spacing = 0
-        row.edgeInsets = NSEdgeInsets(top: 10, left: 14, bottom: 12, right: 14)
+        let host = NSView()
+        host.translatesAutoresizingMaskIntoConstraints = false
         content.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(content)
         NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 14),
-            content.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -14),
+            content.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 14),
+            content.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -14),
+            content.topAnchor.constraint(equalTo: host.topAnchor, constant: 10),
+            content.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -12),
         ])
-        return row
+        return host
     }
 
     static func makeCaption(_ text: String) -> NSTextField {

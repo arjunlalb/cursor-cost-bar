@@ -124,6 +124,10 @@ final class SettingsGeneralTabViewController: NSViewController {
         updateStatusLabel = NSTextField(labelWithString: "")
         updateStatusLabel.font = .systemFont(ofSize: 13)
         updateStatusLabel.textColor = .secondaryLabelColor
+        // Long states ("Couldn't check (…)") must truncate, not push the
+        // window past contentWidth (#101).
+        updateStatusLabel.lineBreakMode = .byTruncatingTail
+        updateStatusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         updateSpinner = NSProgressIndicator()
         updateSpinner.style = .spinning
