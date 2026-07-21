@@ -350,6 +350,11 @@ final class MenuBarPopoverViewController: NSViewController {
 
         resetLabel.font      = NSFont.systemFont(ofSize: 10, weight: .regular)
         resetLabel.textColor = NSColor.tertiaryLabelColor
+        resetLabel.lineBreakMode = .byTruncatingTail
+        resetLabel.setContentCompressionResistancePriority(
+            .init(NSLayoutConstraint.Priority.fittingSizeCompression.rawValue - 1),
+            for: .horizontal
+        )
 
         styleIntervalPopUp(intervalButton)
 
@@ -483,62 +488,46 @@ final class MenuBarPopoverViewController: NSViewController {
     // MARK: - Apply state
 
     private func applyData(_ data: UsageDisplayData) {
-        // User info
         nameLabel.stringValue = data.name
         emailLabel.stringValue = data.email
-
         if let type = data.membershipType {
             badgeLabel.stringValue = type.capitalized
-            badgeLabel.isHidden    = false
+            badgeLabel.isHidden = false
         } else {
             badgeLabel.isHidden = true
         }
 
-        // Usage
-        usageTitleLabel.stringValue = data.usageLabel
-        usageValueLabel.stringValue = data.usageText
-        refreshButton.isEnabled     = !viewModel.isLoading
-        refreshButton.isHidden      = (viewModel.authState != .loggedIn)
+        let totals = viewModel.costTotals
+        usageTitleLabel.stringValue = "Today (PT)"
+        usageValueLabel.stringValue = totals.map { CostTotals.formatDollars($0.todayDollars) } ?? "—"
+        usageValueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 16, weight: .semibold)
+        usageValueLabel.textColor = NSColor.labelColor
 
-        // Progress
-        progressBar.progress = min(data.percentUsed / 100.0, 1.0)
-        progressBar.barColor = CircularProgressIcon.tokenColor(for: data.percentUsed)
-        percentLabel.stringValue = data.percentText
+        secondaryKey.stringValue = "This week (Mon–now PT)"
+        secondaryValue.stringValue = totals.map { CostTotals.formatDollars($0.weekDollars) } ?? "—"
+        secondaryValue.font = NSFont.monospacedDigitSystemFont(ofSize: 14, weight: .medium)
+        secondaryValue.textColor = NSColor.labelColor
+        secondaryRow.isHidden = false
 
-        // Secondary metric row (label + value vary by mode — see UsageDisplayData)
-        if let label = data.secondaryUsageLabel, let value = data.secondaryUsageValue {
-            secondaryKey.stringValue   = label
-            secondaryValue.stringValue = value
-            // Highlight over-limit values in red so the user immediately notices
-            // the previous-primary dimension is exceeded while in on-demand mode.
-            secondaryValue.textColor = data.secondaryUsageIsOverLimit
-                ? NSColor.systemRed
-                : NSColor.secondaryLabelColor
-            secondaryRow.isHidden = false
+        progressBar.isHidden = true
+        percentLabel.isHidden = true
+
+        refreshButton.isEnabled = !viewModel.isLoading
+        refreshButton.isHidden = (viewModel.authState != .loggedIn)
+
+        setWeeklyChartVisible(false)
+
+        if let totals {
+            resetLabel.stringValue = "On-demand charges only"
+            resetLabel.toolTip = "Week since \(totals.weekStartLabel) (Mon PT). Plan-included usage shows $0.00."
+        } else if viewModel.isEnterpriseTeam {
+            resetLabel.stringValue = "Loading usage events…"
+            resetLabel.toolTip = nil
         } else {
-            secondaryRow.isHidden = true
+            resetLabel.stringValue = "Cost totals require an enterprise team account."
+            resetLabel.toolTip = nil
         }
 
-        // Weekly chart (enterprise + master toggle gate).
-        if viewModel.weeklyChartEnabled,
-           viewModel.isEnterpriseTeam,
-           let weekly = viewModel.weeklyData, weekly.count == 7
-        {
-            weeklyChartView.update(
-                days: weekly,
-                style: viewModel.weeklyChartStyle,
-                creditBased: data.isCreditBased
-            )
-            setWeeklyChartVisible(true)
-        } else {
-            setWeeklyChartVisible(false)
-        }
-
-        // Reset
-        resetLabel.stringValue = data.resetText ?? ""
-        resetLabel.toolTip = data.resetAbsoluteText
-
-        // Interval popup
         syncIntervalPopUp()
     }
 

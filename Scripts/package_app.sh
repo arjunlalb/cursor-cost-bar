@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-APP_NAME="CursorMeter"
+APP_NAME="CursorCostBar"
 APP_VERSION="${APP_VERSION:-0.1.0}"
 BUILD_DIR=".build/release"
 APP_BUNDLE="${APP_NAME}.app"
@@ -17,7 +17,7 @@ rm -rf "${APP_BUNDLE}"
 mkdir -p "${MACOS}" "${RESOURCES}"
 
 # Copy executable
-cp "${BUILD_DIR}/${APP_NAME}" "${MACOS}/${APP_NAME}"
+cp "${BUILD_DIR}/CursorMeter" "${MACOS}/${APP_NAME}"
 
 # Copy app icon
 cp "Resources/AppIcon.icns" "${RESOURCES}/AppIcon.icns"
@@ -29,13 +29,13 @@ cat > "${CONTENTS}/Info.plist" << PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>CursorMeter</string>
+    <string>CursorCostBar</string>
     <key>CFBundleIdentifier</key>
-    <string>com.woojin.CursorMeter</string>
+    <string>com.arjunlalb.CursorCostBar</string>
     <key>CFBundleName</key>
-    <string>CursorMeter</string>
+    <string>CursorCostBar</string>
     <key>CFBundleDisplayName</key>
-    <string>CursorMeter</string>
+    <string>CursorCostBar</string>
     <key>CFBundleVersion</key>
     <string>${APP_VERSION}</string>
     <key>CFBundleShortVersionString</key>

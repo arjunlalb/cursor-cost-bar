@@ -111,11 +111,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     private func updateStatusItem() {
-        // Skip while the jump coordinator is showing an emoji glyph — otherwise
-        // a subsequent viewModel mutation (weekly fetch, isLoading flip, etc.)
-        // would clobber the emoji before its restore timer fires.
+        guard let button = statusItem?.button else { return }
         if jumpCoordinator?.isSwapping == true { return }
-        statusItem?.button?.image = currentRingImage()
+
+        if let totals = viewModel.costTotals, viewModel.authState == .loggedIn {
+            button.image = nil
+            button.imagePosition = .noImage
+            button.title = totals.menuBarTitle
+            button.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+            return
+        }
+
+        button.title = ""
+        button.imagePosition = .imageOnly
+        button.image = currentRingImage()
     }
 
     /// Builds the ring/idle image that should currently occupy the menu bar slot,
@@ -301,6 +310,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private func observeStatusItem() {
         withObservationTracking {
             _ = viewModel.usageData
+            _ = viewModel.costTotals
             _ = viewModel.menuBarDisplayMode
             _ = viewModel.authState
         } onChange: { [weak self] in
@@ -420,6 +430,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             // does not participate in @Observable change tracking on its own.
             _ = viewModel.lastUpdateCheckResult
             _ = viewModel.refreshInterval
+            _ = viewModel.costTotals
             _ = viewModel.weeklyData
             _ = viewModel.isEnterpriseTeam
             _ = viewModel.weeklyChartEnabled

@@ -394,7 +394,7 @@ final class WeeklyUsageTests: XCTestCase {
         XCTAssertEqual(oldest?.timeIntervalSince1970, event("2026-05-08", cost: 1).date?.timeIntervalSince1970)
     }
 
-    // MARK: - collectWeeklyEvents pagination
+    // MARK: - collectUsageEvents pagination
 
     func testCollectWeeklyEventsStopsOnOldEvent() async throws {
         let config = URLSessionConfiguration.ephemeral
@@ -421,7 +421,7 @@ final class WeeklyUsageTests: XCTestCase {
             return (resp, Data(json.utf8))
         }
 
-        let events = try await UsageViewModel.collectWeeklyEvents(
+        let events = try await UsageViewModel.collectUsageEvents(
             apiClient: client,
             cookieHeader: "session=x",
             teamId: 42,
@@ -459,7 +459,7 @@ final class WeeklyUsageTests: XCTestCase {
             return (resp, Data(json.utf8))
         }
 
-        _ = try await UsageViewModel.collectWeeklyEvents(
+        _ = try await UsageViewModel.collectUsageEvents(
             apiClient: client,
             cookieHeader: "session=x",
             teamId: 42,
@@ -491,7 +491,7 @@ final class WeeklyUsageTests: XCTestCase {
             return (resp, Data(json.utf8))
         }
 
-        let events = try await UsageViewModel.collectWeeklyEvents(
+        let events = try await UsageViewModel.collectUsageEvents(
             apiClient: client,
             cookieHeader: "session=x",
             teamId: 42,

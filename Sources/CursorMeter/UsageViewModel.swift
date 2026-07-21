@@ -209,8 +209,10 @@ final class UsageViewModel {
     var jumpIntensity: JumpIntensity = .normal
     var jumpGlyphStyle: JumpGlyphStyle = .classic
 
-    // MARK: - Weekly Chart
+    // MARK: - Cost totals (today + Monday week, PT)
 
+    /// Last successful charged-cost aggregation from usage events.
+    var costTotals: CostTotals?
     /// Last successful weekly fetch, retained across failed refreshes so the
     /// chart keeps rendering when the network blips.
     var weeklyData: [DayUsage]?
@@ -474,6 +476,7 @@ final class UsageViewModel {
         cachedTeamId = nil
         cachedUserId = nil
         cachedOnDemandLimitDollars = nil
+        costTotals = nil
         weeklyData = nil
         isEnterpriseTeam = false
         previousCycleStart = nil
@@ -571,8 +574,8 @@ final class UsageViewModel {
         // one round-trip on every subsequent enterprise refresh. First
         // refresh after login falls back to the sequential path inside
         // `refreshWeeklyChart`.
-        let optimisticWeekly: Task<[DayUsage], Error>? =
-            makeOptimisticWeeklyTask(cookieHeader: cookieHeader)
+        let optimisticWeekly: Task<CostTotals, Error>? =
+            makeOptimisticCostTask(cookieHeader: cookieHeader)
 
         // Optimistic hard-limit fetch — same prior-refresh teamId gating as
         // the weekly task. Runs in parallel once a teamId is cached.
@@ -697,9 +700,9 @@ final class UsageViewModel {
         // Weekly chart: consume the optimistic task if we had one, otherwise
         // fall through to the sequential path that resolves teamId first.
         if let task = optimisticWeekly, !accountSwitched {
-            await applyOptimisticWeekly(task)
+            await applyOptimisticCostTotals(task)
         } else if let data = usageData {
-            await refreshWeeklyChart(cookieHeader: cookieHeader, data: data, userInfo: userInfo)
+            await refreshCostTotals(cookieHeader: cookieHeader, data: data, userInfo: userInfo)
         }
 
         // Check notification thresholds
@@ -792,33 +795,29 @@ final class UsageViewModel {
         Log.error("Refresh failed: \(error.localizedDescription)")
     }
 
-    // MARK: - Weekly chart refresh
+    // MARK: - Cost totals refresh
 
-    /// Max pages to walk before giving up. Safety cap — realistic 7-day volume
-    /// is ~30 events for an active user, so even a 100-event/day burst stops
-    /// well within 5 pages of size 100.
-    private static let weeklyMaxPages = 5
-    private static let weeklyPageSize = 100
+    /// Max pages to walk before giving up. Safety cap for a Monday–now window.
+    private static let usageEventsMaxPages = 10
+    private static let usageEventsPageSize = 100
 
-    /// Returns an optimistic weekly task only when we have *both* a cached
-    /// teamId and userId — otherwise we have to discover one first via the
-    /// sequential path.
-    private func makeOptimisticWeeklyTask(
+    /// Returns an optimistic cost task when teamId + userId are cached.
+    private func makeOptimisticCostTask(
         cookieHeader: String
-    ) -> Task<[DayUsage], Error>? {
+    ) -> Task<CostTotals, Error>? {
         guard let teamId = cachedTeamId, let userId = cachedUserId else { return nil }
         let apiClient = self.apiClient
-        let pageSize = Self.weeklyPageSize
-        let maxPages = Self.weeklyMaxPages
+        let pageSize = Self.usageEventsPageSize
+        let maxPages = Self.usageEventsMaxPages
         return Task {
-            try await Self.collectWeeklyEvents(
+            try await Self.collectUsageEvents(
                 apiClient: apiClient,
                 cookieHeader: cookieHeader,
                 teamId: teamId,
                 userId: userId,
                 pageSize: pageSize,
                 maxPages: maxPages
-            ).sevenDayRolling(today: Date(), calendar: .current)
+            ).costTotals()
         }
     }
 
@@ -873,9 +872,8 @@ final class UsageViewModel {
     }
 
     /// Walks pages newest-first, stopping once a page contains events older
-    /// than the 7-day cutoff. Returns the flattened event list (caller folds
-    /// via `sevenDayRolling`).
-    nonisolated static func collectWeeklyEvents(
+    /// than the Monday 00:00 PT week start. Returns the flattened event list.
+    nonisolated static func collectUsageEvents(
         apiClient: CursorAPIClient,
         cookieHeader: String,
         teamId: Int,
@@ -883,13 +881,9 @@ final class UsageViewModel {
         pageSize: Int,
         maxPages: Int,
         today: Date = Date(),
-        calendar: Calendar = .current
+        calendar: Calendar = CostAggregation.pstCalendar
     ) async throws -> [UsageEvent] {
-        let cutoff = calendar.date(
-            byAdding: .day,
-            value: -6,
-            to: calendar.startOfDay(for: today)
-        )!
+        let cutoff = CostAggregation.weekStartMonday(for: today, calendar: calendar)
         var collected: [UsageEvent] = []
         for page in 1...maxPages {
             let response = try await apiClient.fetchWeeklyUsage(
@@ -908,75 +902,73 @@ final class UsageViewModel {
         return collected
     }
 
-    private func applyOptimisticWeekly(_ task: Task<[DayUsage], Error>) async {
+    private func applyOptimisticCostTotals(_ task: Task<CostTotals, Error>) async {
         do {
-            weeklyData = try await task.value
+            costTotals = try await task.value
             isEnterpriseTeam = true
         } catch APIError.forbidden {
-            Log.info("Weekly fetch returned 403 — clearing enterprise cache")
+            Log.info("Usage events fetch returned 403 — clearing enterprise cache")
             cachedTeamId = nil
             cachedUserId = nil
             cachedOnDemandLimitDollars = nil
             isEnterpriseTeam = false
-            weeklyData = nil
+            costTotals = nil
         } catch {
-            Log.info("Weekly fetch failed: \(error.localizedDescription)")
-            if weeklyData == nil {
+            Log.info("Cost totals fetch failed: \(error.localizedDescription)")
+            if costTotals == nil {
                 isEnterpriseTeam = false
             }
         }
     }
 
-    private func refreshWeeklyChart(
+    private func refreshCostTotals(
         cookieHeader: String,
         data: UsageDisplayData,
         userInfo: UserInfoResponse
     ) async {
         guard data.membershipType?.lowercased() == "enterprise" else {
             isEnterpriseTeam = false
-            weeklyData = nil
+            costTotals = nil
             return
         }
 
         guard let teamId = await resolveTeamId(cookieHeader: cookieHeader) else {
             isEnterpriseTeam = false
-            weeklyData = nil
+            costTotals = nil
             return
         }
 
-        // Discover numeric userId if absent. Matched by email against team-spend
-        // roster (token-based refreshes may already have cached it).
         if cachedUserId == nil {
             cachedUserId = await fetchMyTeamMember(
                 cookieHeader: cookieHeader, teamId: teamId, email: userInfo.email)?.userId
         }
         guard let userId = cachedUserId else {
             isEnterpriseTeam = false
-            weeklyData = nil
+            costTotals = nil
             return
         }
 
         do {
-            let events = try await Self.collectWeeklyEvents(
+            let events = try await Self.collectUsageEvents(
                 apiClient: apiClient,
                 cookieHeader: cookieHeader,
                 teamId: teamId,
                 userId: userId,
-                pageSize: Self.weeklyPageSize,
-                maxPages: Self.weeklyMaxPages
+                pageSize: Self.usageEventsPageSize,
+                maxPages: Self.usageEventsMaxPages
             )
-            weeklyData = events.sevenDayRolling(today: Date(), calendar: .current)
+            costTotals = events.costTotals()
             isEnterpriseTeam = true
         } catch APIError.forbidden {
-            Log.info("Weekly fetch returned 403 — clearing enterprise cache")
+            Log.info("Usage events fetch returned 403 — clearing enterprise cache")
             cachedTeamId = nil
             cachedUserId = nil
             cachedOnDemandLimitDollars = nil
             isEnterpriseTeam = false
-            weeklyData = nil
+            costTotals = nil
         } catch {
-            Log.info("Weekly fetch failed: \(error.localizedDescription)")
-            if weeklyData == nil {
+            Log.info("Cost totals fetch failed: \(error.localizedDescription)")
+            if costTotals == nil {
                 isEnterpriseTeam = false
             }
         }
@@ -1030,6 +1022,7 @@ final class UsageViewModel {
         authState = .loggedOut
         usageData = nil
         errorMessage = nil
+        costTotals = nil
         weeklyData = nil
         isEnterpriseTeam = false
         cachedTeamId = nil
