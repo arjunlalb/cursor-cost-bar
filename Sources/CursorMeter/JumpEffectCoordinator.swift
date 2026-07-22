@@ -8,15 +8,15 @@ import Observation
 /// - Observes `viewModel.lastJump` via Swift Observation tracking (re-arm pattern).
 /// - On a relevant tier (per `JumpIntensity` policy), swaps `statusItem.button.image`
 ///   to a fixed-size emoji glyph rendered by `CircularProgressIcon.makeEmojiImage`.
-/// - Schedules a `Timer` to restore the original ring image via the injected
-///   `restoreImage` closure.
+/// - Schedules a `Timer` to restore the menu bar slot via the injected
+///   `restoreMenuBar` closure.
 /// - On `Bold + tier 2`, additionally fires `NotificationManager.notifyUsageJump`.
 @MainActor
 final class JumpEffectCoordinator {
     private let statusItem: NSStatusItem
     private let viewModel: UsageViewModel
     private let notifier: NotificationManager
-    private let restoreImage: () -> NSImage
+    private let restoreMenuBar: () -> Void
 
     private var swapTimer: Timer?
     private var isObserving = false
@@ -30,12 +30,12 @@ final class JumpEffectCoordinator {
         statusItem: NSStatusItem,
         viewModel: UsageViewModel,
         notifier: NotificationManager,
-        restoreImage: @escaping () -> NSImage
+        restoreMenuBar: @escaping () -> Void
     ) {
         self.statusItem = statusItem
         self.viewModel = viewModel
         self.notifier = notifier
-        self.restoreImage = restoreImage
+        self.restoreMenuBar = restoreMenuBar
     }
 
     /// Begin observing `viewModel.lastJump`. Idempotent — calling twice is a no-op.
@@ -93,8 +93,10 @@ final class JumpEffectCoordinator {
 
     private func performSwap(emoji: String, glow: Bool, durationMs: Int) {
         guard let button = statusItem.button else { return }
-        let size = button.image?.size ?? NSSize(width: 22, height: 22)
-        button.image = CircularProgressIcon.makeEmojiImage(emoji: emoji, size: size, glow: glow)
+        button.image = nil
+        button.imagePosition = .noImage
+        button.title = emoji
+        button.font = NSFont.systemFont(ofSize: glow ? 14 : 12, weight: .bold)
 
         swapTimer?.invalidate()
         swapTimer = Timer.scheduledTimer(
@@ -108,7 +110,7 @@ final class JumpEffectCoordinator {
     }
 
     private func restore() {
-        statusItem.button?.image = restoreImage()
+        restoreMenuBar()
         swapTimer = nil
     }
 

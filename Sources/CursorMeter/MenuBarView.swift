@@ -46,6 +46,24 @@ final class MenuBarPopoverViewController: NSViewController {
     private let secondaryKey      = NSTextField(labelWithString: "")
     private let secondaryValue    = NSTextField(labelWithString: "")
 
+    // Metrics panel (today UTC + week PT, or per-day week breakdown)
+    private lazy var metricsComparisonView = MetricsComparisonView(frame: .zero)
+    private lazy var usageViewSegment: NSSegmentedControl = {
+        NSSegmentedControl(
+            labels: UsagePopoverView.allCases.map(\.label),
+            trackingMode: .selectOne,
+            target: nil,
+            action: nil
+        )
+    }()
+    private lazy var dailyTimezoneSegment: NSSegmentedControl = {
+        NSSegmentedControl(
+            labels: UsageDayTimezone.allCases.map(\.label),
+            trackingMode: .selectOne,
+            target: nil,
+            action: nil
+        )
+    }()
     // Weekly chart (enterprise teams only). `lazy var` so a user who never
     // opens the popover (or who's on a non-enterprise account) doesn't pay
     // for the chart NSView allocation up front.
@@ -101,7 +119,7 @@ final class MenuBarPopoverViewController: NSViewController {
             rootStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -6),
             rootStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
             rootStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
-            container.widthAnchor.constraint(equalToConstant: 260),
+            container.widthAnchor.constraint(equalToConstant: 280),
         ])
     }
 
@@ -160,7 +178,7 @@ final class MenuBarPopoverViewController: NSViewController {
     }
 
     private func publishCurrentSize() {
-        let size = NSSize(width: 260, height: ceil(rootStack.fittingSize.height + 12))
+        let size = NSSize(width: 280, height: ceil(rootStack.fittingSize.height + 12))
         preferredContentSize = size
         onContentSizeChange?(size)
     }
@@ -252,7 +270,17 @@ final class MenuBarPopoverViewController: NSViewController {
         dataStack.addArrangedSubview(userInfoRow)
         dataStack.addArrangedSubview(makeDivider())
 
-        // --- Usage label + value + refresh ---
+        usageViewSegment.selectedSegment = 0
+        usageViewSegment.target = self
+        usageViewSegment.action = #selector(usageViewChanged)
+        dailyTimezoneSegment.selectedSegment = 0
+        dailyTimezoneSegment.target = self
+        dailyTimezoneSegment.action = #selector(dailyTimezoneChanged)
+        dataStack.addArrangedSubview(usageControlsRow())
+        dataStack.addArrangedSubview(metricsComparisonView)
+        dataStack.addArrangedSubview(makeDivider())
+
+        // --- Legacy usage rows (hidden; metrics panel replaces them) ---
         let usageRow = NSStackView()
         usageRow.orientation = .horizontal
         usageRow.spacing = 4
@@ -266,17 +294,13 @@ final class MenuBarPopoverViewController: NSViewController {
         usageValueLabel.textColor = NSColor.secondaryLabelColor
         usageValueLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
 
-        styleIconButton(refreshButton, symbolName: "arrow.clockwise", size: 10)
-        refreshButton.target = self
-        refreshButton.action = #selector(refreshTapped)
-
         let spacer2 = makeFlexibleSpacer()
         usageRow.addArrangedSubview(usageTitleLabel)
         usageRow.addArrangedSubview(spacer2)
         usageRow.addArrangedSubview(usageValueLabel)
-        usageRow.addArrangedSubview(refreshButton)
 
         dataStack.addArrangedSubview(usageRow)
+        usageRow.isHidden = true
 
         // --- Progress bar + percent ---
         let progressRow = NSStackView()
@@ -298,6 +322,7 @@ final class MenuBarPopoverViewController: NSViewController {
         progressRow.addArrangedSubview(percentLabel)
 
         dataStack.addArrangedSubview(progressRow)
+        progressRow.isHidden = true
 
         // --- Secondary metric row ---
         secondaryRow.orientation = .horizontal
@@ -316,12 +341,9 @@ final class MenuBarPopoverViewController: NSViewController {
         secondaryRow.addArrangedSubview(secondaryValue)
 
         dataStack.addArrangedSubview(secondaryRow)
+        secondaryRow.isHidden = true
 
-        // --- Weekly chart (enterprise) ---
-        // The container stays in `dataStack` for its lifetime; toggling the
-        // height constraint to 0 (instead of detaching the view) sidesteps
-        // an NSStackView/AutoLayout quirk where `fittingSize` keeps caching
-        // the inflated value after `removeArrangedSubview`.
+        // Weekly chart (enterprise teams only). `lazy var` so a user who never
         weeklyChartContainer.translatesAutoresizingMaskIntoConstraints = false
         weeklyChartView.translatesAutoresizingMaskIntoConstraints = false
         weeklyChartContainer.addSubview(weeklyChartView)
@@ -497,38 +519,81 @@ final class MenuBarPopoverViewController: NSViewController {
             badgeLabel.isHidden = true
         }
 
-        let totals = viewModel.costTotals
-        usageTitleLabel.stringValue = "Today (PT)"
-        usageValueLabel.stringValue = totals.map { CostTotals.formatDollars($0.todayDollars) } ?? "—"
-        usageValueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 16, weight: .semibold)
-        usageValueLabel.textColor = NSColor.labelColor
-
-        secondaryKey.stringValue = "This week (Mon–now PT)"
-        secondaryValue.stringValue = totals.map { CostTotals.formatDollars($0.weekDollars) } ?? "—"
-        secondaryValue.font = NSFont.monospacedDigitSystemFont(ofSize: 14, weight: .medium)
-        secondaryValue.textColor = NSColor.labelColor
-        secondaryRow.isHidden = false
-
-        progressBar.isHidden = true
-        percentLabel.isHidden = true
+        syncUsageViewSegment()
+        syncDailyTimezoneSegment()
+        refreshMetricsPanel()
 
         refreshButton.isEnabled = !viewModel.isLoading
         refreshButton.isHidden = (viewModel.authState != .loggedIn)
 
         setWeeklyChartVisible(false)
 
-        if let totals {
-            resetLabel.stringValue = "On-demand charges only"
-            resetLabel.toolTip = "Week since \(totals.weekStartLabel) (Mon PT). Plan-included usage shows $0.00."
+        if let totals = viewModel.dashboardTotals {
+            let footnote = totals.weekEventsIncomplete
+                ? "Since Mon \(totals.weekStartLabel) PT — weekly total may be low (not all events retrieved)"
+                : "Since Mon \(totals.weekStartLabel) PT · matches dashboard chargedCents"
+            resetLabel.stringValue = footnote
+            resetLabel.toolTip = "Today column follows UTC/PT selector. Since Mon PT is your weekly limit window."
         } else if viewModel.isEnterpriseTeam {
             resetLabel.stringValue = "Loading usage events…"
             resetLabel.toolTip = nil
         } else {
-            resetLabel.stringValue = "Cost totals require an enterprise team account."
+            resetLabel.stringValue = "Event metrics require an enterprise team account."
             resetLabel.toolTip = nil
         }
 
         syncIntervalPopUp()
+    }
+
+    private func usageControlsRow() -> NSView {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.spacing = 4
+        row.translatesAutoresizingMaskIntoConstraints = false
+
+        usageViewSegment.translatesAutoresizingMaskIntoConstraints = false
+        dailyTimezoneSegment.translatesAutoresizingMaskIntoConstraints = false
+        styleIconButton(refreshButton, symbolName: "arrow.clockwise", size: 10)
+        refreshButton.target = self
+        refreshButton.action = #selector(refreshTapped)
+
+        row.addArrangedSubview(usageViewSegment)
+        row.addArrangedSubview(dailyTimezoneSegment)
+        row.addArrangedSubview(makeFlexibleSpacer())
+        row.addArrangedSubview(refreshButton)
+        return row
+    }
+
+    private func syncUsageViewSegment() {
+        usageViewSegment.selectedSegment = viewModel.usagePopoverView.rawValue
+    }
+
+    private func syncDailyTimezoneSegment() {
+        dailyTimezoneSegment.selectedSegment = viewModel.dailyTimezone.rawValue
+    }
+
+    @objc private func usageViewChanged() {
+        let index = usageViewSegment.selectedSegment
+        guard index >= 0, let popoverView = UsagePopoverView(rawValue: index) else { return }
+        viewModel.setUsagePopoverView(popoverView)
+        refreshMetricsPanel()
+        self.view.layoutSubtreeIfNeeded()
+        publishCurrentSize()
+    }
+
+    @objc private func dailyTimezoneChanged() {
+        let index = dailyTimezoneSegment.selectedSegment
+        guard index >= 0, let timezone = UsageDayTimezone(rawValue: index) else { return }
+        viewModel.setDailyTimezone(timezone)
+        refreshMetricsPanel()
+    }
+
+    private func refreshMetricsPanel() {
+        metricsComparisonView.update(
+            totals: viewModel.dashboardTotals,
+            view: viewModel.usagePopoverView,
+            dayTimezone: viewModel.dailyTimezone
+        )
     }
 
     private func setWeeklyChartVisible(_ visible: Bool) {

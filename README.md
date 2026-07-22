@@ -4,10 +4,20 @@ Fork of [CursorMeter](https://github.com/WoojinAhn/CursorMeter) focused on **on-
 
 ## What it shows
 
-- **Today (PT)** — sum of `chargedCents` for on-demand events today (America/Los_Angeles)
-- **This week (Mon–now PT)** — same metric from Monday 00:00 Pacific through now
+Open the menu bar popover for a **metrics comparison table** (Today PT | Week Mon–now PT):
 
-Plan-included usage contributes **$0.00** by design (actual charges only).
+| Metric | Source |
+|--------|--------|
+| On-demand billed $ | `chargedCents` on usage-based events only |
+| All chargedCents $ | Every event's `chargedCents` |
+| Token cost $ | `tokenUsage.totalCents` |
+| Weighted units | `requestsCosts` (matches Cursor request quota) |
+| Events | Event count |
+| Input / output tokens | When present in events |
+
+Billing-cycle totals from `usage-summary` appear below the table.
+
+Pick which metric drives the **menu bar title** via the popover dropdown or Settings → Display → Menu bar metric.
 
 ## Requirements
 

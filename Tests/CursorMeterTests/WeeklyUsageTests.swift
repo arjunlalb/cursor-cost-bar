@@ -421,19 +421,20 @@ final class WeeklyUsageTests: XCTestCase {
             return (resp, Data(json.utf8))
         }
 
-        let events = try await UsageViewModel.collectUsageEvents(
+        let collection = try await UsageViewModel.collectUsageEvents(
             apiClient: client,
             cookieHeader: "session=x",
             teamId: 42,
             userId: 232352588,
             pageSize: 100,
-            maxPages: 5,
+            maxSafetyPages: 5,
             today: date("2026-05-13"),
             calendar: utcCalendar
         )
 
         XCTAssertEqual(pagesRequested, [1], "stopped after page 1 because oldest event < cutoff")
-        XCTAssertEqual(events.count, 2)
+        XCTAssertEqual(collection.events.count, 2)
+        XCTAssertFalse(collection.weekEventsIncomplete)
     }
 
     func testCollectWeeklyEventsHitsMaxPagesCap() async throws {
@@ -447,30 +448,122 @@ final class WeeklyUsageTests: XCTestCase {
             let body = (try? JSONSerialization.jsonObject(with: Self.bodyData(from: request)) as? [String: Any]) ?? [:]
             let page = body["page"] as? Int ?? 0
             pagesRequested.append(page)
-            // Every page returns events within the 7-day window — paginator never stops naturally.
+            // Full pages within the week — paginator only stops at the safety cap.
             let newMs = Int(self.date("2026-05-13").timeIntervalSince1970 * 1000)
+            let events = (0..<100).map { i in
+                #"{"timestamp": "\#(newMs + i)", "requestsCosts": 1}"#
+            }.joined(separator: ",")
             let json = """
-            { "totalUsageEventsCount": 600,
-              "usageEventsDisplay": [
-                {"timestamp": "\(newMs)", "requestsCosts": 1}
-              ] }
+            { "totalUsageEventsCount": 100000,
+              "usageEventsDisplay": [\(events)] }
             """
             let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             return (resp, Data(json.utf8))
         }
 
-        _ = try await UsageViewModel.collectUsageEvents(
+        let collection = try await UsageViewModel.collectUsageEvents(
             apiClient: client,
             cookieHeader: "session=x",
             teamId: 42,
             userId: 232352588,
             pageSize: 100,
-            maxPages: 5,
+            maxSafetyPages: 5,
             today: date("2026-05-13"),
             calendar: utcCalendar
         )
 
         XCTAssertEqual(pagesRequested, [1, 2, 3, 4, 5])
+        XCTAssertEqual(collection.events.count, 500)
+        XCTAssertTrue(collection.weekEventsIncomplete)
+    }
+
+    func testCollectUsageEventsStopsWhenReportedTotalReached() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let client = CursorAPIClient(configuration: config)
+        defer { MockURLProtocol.requestHandler = nil }
+
+        var pagesRequested: [Int] = []
+        MockURLProtocol.requestHandler = { request in
+            let body = (try? JSONSerialization.jsonObject(with: Self.bodyData(from: request)) as? [String: Any]) ?? [:]
+            let page = body["page"] as? Int ?? 0
+            pagesRequested.append(page)
+            let newMs = Int(self.date("2026-05-13").timeIntervalSince1970 * 1000)
+            let events = (0..<100).map { i in
+                #"{"timestamp": "\#(newMs + i)", "requestsCosts": 1, "chargedCents": 4}"#
+            }.joined(separator: ",")
+            let json = """
+            { "totalUsageEventsCount": 150,
+              "usageEventsDisplay": [\(events)] }
+            """
+            let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (resp, Data(json.utf8))
+        }
+
+        let collection = try await UsageViewModel.collectUsageEvents(
+            apiClient: client,
+            cookieHeader: "session=x",
+            teamId: 42,
+            userId: 232352588,
+            pageSize: 100,
+            maxSafetyPages: 50,
+            today: date("2026-05-13"),
+            calendar: utcCalendar
+        )
+
+        XCTAssertEqual(pagesRequested, [1, 2], "stops once collected count reaches totalUsageEventsCount")
+        XCTAssertEqual(collection.events.count, 150)
+        XCTAssertTrue(collection.weekEventsIncomplete, "catalog ended before Monday cutoff")
+    }
+
+    func testCollectUsageEventsStopsOnPartialPage() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let client = CursorAPIClient(configuration: config)
+        defer { MockURLProtocol.requestHandler = nil }
+
+        var pagesRequested: [Int] = []
+        MockURLProtocol.requestHandler = { request in
+            let body = (try? JSONSerialization.jsonObject(with: Self.bodyData(from: request)) as? [String: Any]) ?? [:]
+            let page = body["page"] as? Int ?? 0
+            pagesRequested.append(page)
+            let newMs = Int(self.date("2026-05-13").timeIntervalSince1970 * 1000)
+            let json: String
+            if page == 1 {
+                let events = (0..<100).map { i in
+                    #"{"timestamp": "\#(newMs + i)", "requestsCosts": 1}"#
+                }.joined(separator: ",")
+                json = """
+                { "totalUsageEventsCount": 120,
+                  "usageEventsDisplay": [\(events)] }
+                """
+            } else {
+                let events = (0..<20).map { i in
+                    #"{"timestamp": "\#(newMs + 100 + i)", "requestsCosts": 1}"#
+                }.joined(separator: ",")
+                json = """
+                { "totalUsageEventsCount": 120,
+                  "usageEventsDisplay": [\(events)] }
+                """
+            }
+            let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (resp, Data(json.utf8))
+        }
+
+        let collection = try await UsageViewModel.collectUsageEvents(
+            apiClient: client,
+            cookieHeader: "session=x",
+            teamId: 42,
+            userId: 232352588,
+            pageSize: 100,
+            maxSafetyPages: 50,
+            today: date("2026-05-13"),
+            calendar: utcCalendar
+        )
+
+        XCTAssertEqual(pagesRequested, [1, 2], "second page is short — API catalog exhausted")
+        XCTAssertEqual(collection.events.count, 120)
+        XCTAssertTrue(collection.weekEventsIncomplete)
     }
 
     func testCollectWeeklyEventsStopsOnEmptyPage() async throws {
@@ -491,19 +584,20 @@ final class WeeklyUsageTests: XCTestCase {
             return (resp, Data(json.utf8))
         }
 
-        let events = try await UsageViewModel.collectUsageEvents(
+        let collection = try await UsageViewModel.collectUsageEvents(
             apiClient: client,
             cookieHeader: "session=x",
             teamId: 42,
             userId: 232352588,
             pageSize: 100,
-            maxPages: 5,
+            maxSafetyPages: 5,
             today: date("2026-05-13"),
             calendar: utcCalendar
         )
 
         XCTAssertEqual(pagesRequested, [1])
-        XCTAssertTrue(events.isEmpty)
+        XCTAssertTrue(collection.events.isEmpty)
+        XCTAssertFalse(collection.weekEventsIncomplete)
     }
 
     // MARK: - fetchWeeklyUsage (CursorAPIClient request shape)

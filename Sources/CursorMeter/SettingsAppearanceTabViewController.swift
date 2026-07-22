@@ -10,7 +10,6 @@ final class SettingsAppearanceTabViewController: NSViewController {
 
     // MARK: - Controls (retained as instance vars for updateUI)
 
-    private var menuBarDisplayPopUp = NSPopUpButton()
     private var jumpEffectToggle = NSSwitch()
     private var jumpIntensitySegmented = NSSegmentedControl()
     private var jumpGlyphStyleSegmented = NSSegmentedControl()
@@ -62,16 +61,6 @@ final class SettingsAppearanceTabViewController: NSViewController {
     // MARK: - Public API
 
     func updateUI() {
-        // Menu bar display mode — percent-only plans can't show a ratio.
-        let percentOnly = viewModel.usageData?.isPercentOnly == true
-        if percentOnly {
-            menuBarDisplayPopUp.selectItem(at: 2)
-            menuBarDisplayPopUp.item(at: 1)?.isEnabled = false
-        } else {
-            menuBarDisplayPopUp.selectItem(at: viewModel.menuBarDisplayMode)
-            menuBarDisplayPopUp.item(at: 1)?.isEnabled = true
-        }
-
         jumpEffectToggle.state = viewModel.jumpEffectEnabled ? .on : .off
         jumpIntensitySegmented.selectedSegment = viewModel.jumpIntensity.rawValue
         jumpGlyphStyleSegmented.selectedSegment = viewModel.jumpGlyphStyle.rawValue
@@ -87,19 +76,12 @@ final class SettingsAppearanceTabViewController: NSViewController {
     // MARK: - Cards
 
     private func makeMenuBarCard() -> NSView {
-        menuBarDisplayPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
-        menuBarDisplayPopUp.addItems(withTitles: [
-            "None",
-            "Ratio (e.g. 120/500)",
-            "Percent (e.g. 24%)",
-        ])
-        menuBarDisplayPopUp.target = self
-        menuBarDisplayPopUp.action = #selector(menuBarDisplayModeChanged)
-
-        return SettingsCardFactory.makeCard(units: [
-            SettingsCardFactory.makeCardRow(
-                title: "Usage text next to icon", control: menuBarDisplayPopUp),
-        ])
+        let caption = NSTextField(wrappingLabelWithString:
+            "Shows total usage as today · week (Mon PT). Ring icons are not used while signed in.")
+        caption.font = NSFont.systemFont(ofSize: 11)
+        caption.textColor = NSColor.secondaryLabelColor
+        caption.preferredMaxLayoutWidth = 320
+        return SettingsCardFactory.makeCard(units: [caption])
     }
 
     private func makeJumpCard() -> NSView {
@@ -174,10 +156,6 @@ final class SettingsAppearanceTabViewController: NSViewController {
     }
 
     // MARK: - Actions
-
-    @objc private func menuBarDisplayModeChanged() {
-        viewModel.setMenuBarDisplayMode(menuBarDisplayPopUp.indexOfSelectedItem)
-    }
 
     @objc private func jumpEffectToggleChanged() {
         let enabled = jumpEffectToggle.state == .on

@@ -4,76 +4,57 @@ import XCTest
 final class CostAggregationTests: XCTestCase {
 
     private var pstCalendar: Calendar { CostAggregation.pstCalendar }
+    private var utcCalendar: Calendar { CostAggregation.utcCalendar }
 
     private func pstStartOfDay(_ ymd: String) -> Date {
-        var comps = DateComponents()
-        comps.calendar = pstCalendar
-        comps.timeZone = CostAggregation.pstTimeZone
-        let parts = ymd.split(separator: "-").map(String.init)
-        comps.year = Int(parts[0])
-        comps.month = Int(parts[1])
-        comps.day = Int(parts[2])
-        comps.hour = 0
-        comps.minute = 0
-        comps.second = 0
-        return pstCalendar.date(from: comps)!
+        date(ymd, hour: 0, calendar: pstCalendar)
     }
 
-    private func event(
-        _ ymd: String,
-        hour: Int = 12,
-        cents: Double,
-        onDemand: Bool = true
-    ) -> UsageEvent {
+    private func date(_ ymd: String, hour: Int, calendar: Calendar) -> Date {
         var comps = DateComponents()
-        comps.calendar = pstCalendar
-        comps.timeZone = CostAggregation.pstTimeZone
+        comps.calendar = calendar
+        comps.timeZone = calendar.timeZone
         let parts = ymd.split(separator: "-").map(String.init)
         comps.year = Int(parts[0])
         comps.month = Int(parts[1])
         comps.day = Int(parts[2])
         comps.hour = hour
-        let day = pstCalendar.date(from: comps)!
-        let ms = Int(day.timeIntervalSince1970 * 1000)
+        comps.minute = 0
+        comps.second = 0
+        return calendar.date(from: comps)!
+    }
+
+    private func event(at date: Date, chargedCents: Double) -> UsageEvent {
+        let ms = Int(date.timeIntervalSince1970 * 1000)
         return UsageEvent(
             timestamp: String(ms),
-            kind: onDemand ? "USAGE_EVENT_KIND_USAGE_BASED" : "USAGE_EVENT_KIND_INCLUDED_IN_BUSINESS",
-            chargedCents: cents
+            requestsCosts: 1,
+            kind: "USAGE_EVENT_KIND_INCLUDED_IN_BUSINESS",
+            chargedCents: chargedCents
         )
     }
 
-    func testWeekStartMondayOnWednesday() {
-        let wed = event("2026-07-22", hour: 15, cents: 0).date!
-        let start = CostAggregation.weekStartMonday(for: wed, calendar: pstCalendar)
-        XCTAssertEqual(pstCalendar.component(.weekday, from: start), 2)
-        XCTAssertEqual(start, pstStartOfDay("2026-07-20"))
+    func testTodayCanBeUTCOrPacific() {
+        // Jul 21 00:30 UTC = Jul 20 17:30 PT
+        let eventDate = date("2026-07-21", hour: 0, calendar: utcCalendar).addingTimeInterval(30 * 60)
+        let now = date("2026-07-21", hour: 12, calendar: utcCalendar)
+        let events = [event(at: eventDate, chargedCents: 301)]
+        let totals = events.dashboardTotals(now: now, pstCalendar: pstCalendar, utcCalendar: utcCalendar)
+
+        XCTAssertEqual(totals.today(for: .utc).totalUsageDollars, 3.01, accuracy: 0.001)
+        XCTAssertEqual(totals.today(for: .pacific).totalUsageDollars, 0, accuracy: 0.001)
     }
 
-    func testWeekStartMondayOnMonday() {
-        let mon = pstStartOfDay("2026-07-20")
-        let start = CostAggregation.weekStartMonday(for: mon, calendar: pstCalendar)
-        XCTAssertEqual(start, mon)
-    }
-
-    func testCostTotalsSumsOnDemandOnly() {
-        let now = event("2026-07-22", hour: 15, cents: 0).date!
-        let events = [
-            event("2026-07-22", cents: 125, onDemand: true),
-            event("2026-07-22", cents: 999, onDemand: false),
-            event("2026-07-21", cents: 50, onDemand: true),
-            event("2026-07-14", cents: 500, onDemand: true),
-        ]
-        let totals = events.costTotals(now: now, calendar: pstCalendar)
-        XCTAssertEqual(totals.todayDollars, 1.25, accuracy: 0.001)
-        XCTAssertEqual(totals.weekDollars, 1.75, accuracy: 0.001)
-        XCTAssertEqual(totals.weekStart, pstStartOfDay("2026-07-20"))
-    }
-
-    func testPlanIncludedEventsContributeZero() {
-        let now = pstStartOfDay("2026-07-20")
-        let events = [event("2026-07-20", cents: 420, onDemand: false)]
-        let totals = events.costTotals(now: now, calendar: pstCalendar)
-        XCTAssertEqual(totals.todayDollars, 0, accuracy: 0.001)
-        XCTAssertEqual(totals.weekDollars, 0, accuracy: 0.001)
+    func testMenuBarTitleRespectsDayTimezone() {
+        let totals = DashboardUsageTotals(
+            todayUTC: DashboardPeriodTotals(totalUsageDollars: 3.01),
+            todayPacific: DashboardPeriodTotals(totalUsageDollars: 12.80),
+            week: DashboardPeriodTotals(totalUsageDollars: 67.01),
+            weekDays: [],
+            weekStart: pstStartOfDay("2026-07-20"),
+            asOf: pstStartOfDay("2026-07-22")
+        )
+        XCTAssertEqual(totals.menuBarTitle(dayTimezone: .utc), "$3.01 · $67.01")
+        XCTAssertEqual(totals.menuBarTitle(dayTimezone: .pacific), "$12.80 · $67.01")
     }
 }

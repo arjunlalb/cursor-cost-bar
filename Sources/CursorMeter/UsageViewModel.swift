@@ -32,6 +32,8 @@ private enum SettingsKey: String {
     case ideAuthSuppressed
     case browserLoginEnabled
     case activityRefreshEnabled
+    case usagePopoverView
+    case dailyTimezone
     // Legacy keys consulted only by `loadSettings` migration block.
     case legacyShowMenuBarText = "showMenuBarText"
     case legacyShowMenuBarPercent = "showMenuBarPercent"
@@ -211,8 +213,12 @@ final class UsageViewModel {
 
     // MARK: - Cost totals (today + Monday week, PT)
 
-    /// Last successful charged-cost aggregation from usage events.
-    var costTotals: CostTotals?
+    /// Dashboard-aligned totals from filtered usage events.
+    var dashboardTotals: DashboardUsageTotals?
+    /// Popover Daily summary vs Weekly per-day breakdown.
+    var usagePopoverView: UsagePopoverView = .daily
+    /// Calendar for the "today" column and menu-bar daily total.
+    var dailyTimezone: UsageDayTimezone = .utc
     /// Last successful weekly fetch, retained across failed refreshes so the
     /// chart keeps rendering when the network blips.
     var weeklyData: [DayUsage]?
@@ -476,7 +482,7 @@ final class UsageViewModel {
         cachedTeamId = nil
         cachedUserId = nil
         cachedOnDemandLimitDollars = nil
-        costTotals = nil
+        dashboardTotals = nil
         weeklyData = nil
         isEnterpriseTeam = false
         previousCycleStart = nil
@@ -574,8 +580,8 @@ final class UsageViewModel {
         // one round-trip on every subsequent enterprise refresh. First
         // refresh after login falls back to the sequential path inside
         // `refreshWeeklyChart`.
-        let optimisticWeekly: Task<CostTotals, Error>? =
-            makeOptimisticCostTask(cookieHeader: cookieHeader)
+        let optimisticWeekly: Task<DashboardUsageTotals, Error>? =
+            makeOptimisticMetricTask(cookieHeader: cookieHeader)
 
         // Optimistic hard-limit fetch — same prior-refresh teamId gating as
         // the weekly task. Runs in parallel once a teamId is cached.
@@ -700,9 +706,9 @@ final class UsageViewModel {
         // Weekly chart: consume the optimistic task if we had one, otherwise
         // fall through to the sequential path that resolves teamId first.
         if let task = optimisticWeekly, !accountSwitched {
-            await applyOptimisticCostTotals(task)
+            await applyOptimisticDashboardTotals(task)
         } else if let data = usageData {
-            await refreshCostTotals(cookieHeader: cookieHeader, data: data, userInfo: userInfo)
+            await refreshDashboardTotals(cookieHeader: cookieHeader, data: data, userInfo: userInfo)
         }
 
         // Check notification thresholds
@@ -797,27 +803,32 @@ final class UsageViewModel {
 
     // MARK: - Cost totals refresh
 
-    /// Max pages to walk before giving up. Safety cap for a Monday–now window.
-    private static let usageEventsMaxPages = 10
+    /// Page size for usage-event fetches. Larger pages mean fewer round trips.
     private static let usageEventsPageSize = 100
+    /// Absolute safety cap — paginate until the Monday PT cutoff or the API is
+    /// exhausted; this only guards against a broken pagination loop.
+    private static let usageEventsMaxSafetyPages = 500
 
     /// Returns an optimistic cost task when teamId + userId are cached.
-    private func makeOptimisticCostTask(
+    private func makeOptimisticMetricTask(
         cookieHeader: String
-    ) -> Task<CostTotals, Error>? {
+    ) -> Task<DashboardUsageTotals, Error>? {
         guard let teamId = cachedTeamId, let userId = cachedUserId else { return nil }
         let apiClient = self.apiClient
         let pageSize = Self.usageEventsPageSize
-        let maxPages = Self.usageEventsMaxPages
+        let maxSafetyPages = Self.usageEventsMaxSafetyPages
         return Task {
-            try await Self.collectUsageEvents(
+            let collection = try await Self.collectUsageEvents(
                 apiClient: apiClient,
                 cookieHeader: cookieHeader,
                 teamId: teamId,
                 userId: userId,
                 pageSize: pageSize,
-                maxPages: maxPages
-            ).costTotals()
+                maxSafetyPages: maxSafetyPages
+            )
+            return collection.events.dashboardTotals(
+                weekEventsIncomplete: collection.weekEventsIncomplete
+            )
         }
     }
 
@@ -871,21 +882,32 @@ final class UsageViewModel {
         }
     }
 
-    /// Walks pages newest-first, stopping once a page contains events older
-    /// than the Monday 00:00 PT week start. Returns the flattened event list.
+    /// Walks pages newest-first until events older than Monday 00:00 PT appear,
+    /// the API returns a short/empty page, or the reported catalog is exhausted.
+    struct CollectedUsageEvents: Sendable {
+        let events: [UsageEvent]
+        /// True when the Monday PT window may be missing events (safety cap hit,
+        /// or the API catalog ended before reaching Monday).
+        let weekEventsIncomplete: Bool
+    }
+
     nonisolated static func collectUsageEvents(
         apiClient: CursorAPIClient,
         cookieHeader: String,
         teamId: Int,
         userId: Int,
         pageSize: Int,
-        maxPages: Int,
+        maxSafetyPages: Int,
         today: Date = Date(),
         calendar: Calendar = CostAggregation.pstCalendar
-    ) async throws -> [UsageEvent] {
+    ) async throws -> CollectedUsageEvents {
         let cutoff = CostAggregation.weekStartMonday(for: today, calendar: calendar)
         var collected: [UsageEvent] = []
-        for page in 1...maxPages {
+        var reachedCutoff = false
+        var reportedTotalCount: Int?
+        var page = 1
+
+        while page <= maxSafetyPages {
             let response = try await apiClient.fetchWeeklyUsage(
                 cookieHeader: cookieHeader,
                 teamId: teamId,
@@ -893,18 +915,52 @@ final class UsageViewModel {
                 page: page,
                 pageSize: pageSize
             )
+            if reportedTotalCount == nil {
+                reportedTotalCount = response.totalUsageEventsCount
+            }
+
             let events = response.usageEventsDisplay
             collected.append(contentsOf: events)
+
             if events.isEmpty { break }
-            guard let oldest = events.oldestEventDate() else { break }
-            if oldest < cutoff { break }
+
+            if let oldest = events.oldestEventDate(), oldest < cutoff {
+                reachedCutoff = true
+                break
+            }
+
+            if let total = reportedTotalCount, collected.count >= total {
+                if collected.count > total {
+                    collected = Array(collected.prefix(total))
+                }
+                break
+            }
+
+            // Short page — no further events exist in the API catalog.
+            if events.count < pageSize { break }
+
+            page += 1
         }
-        return collected
+
+        let hitSafetyCap = page >= maxSafetyPages && !reachedCutoff && !collected.isEmpty
+        let incomplete = !reachedCutoff && !collected.isEmpty
+        if hitSafetyCap {
+            Log.info(
+                "Usage events pagination hit safety cap at \(maxSafetyPages) pages " +
+                "(\(collected.count) events) — weekly totals may be low"
+            )
+        } else if incomplete {
+            Log.info(
+                "Usage events catalog ended before Monday PT cutoff " +
+                "(\(collected.count) events) — weekly totals may be low"
+            )
+        }
+        return CollectedUsageEvents(events: collected, weekEventsIncomplete: incomplete)
     }
 
-    private func applyOptimisticCostTotals(_ task: Task<CostTotals, Error>) async {
+    private func applyOptimisticDashboardTotals(_ task: Task<DashboardUsageTotals, Error>) async {
         do {
-            costTotals = try await task.value
+            dashboardTotals = try await task.value
             isEnterpriseTeam = true
         } catch APIError.forbidden {
             Log.info("Usage events fetch returned 403 — clearing enterprise cache")
@@ -912,29 +968,29 @@ final class UsageViewModel {
             cachedUserId = nil
             cachedOnDemandLimitDollars = nil
             isEnterpriseTeam = false
-            costTotals = nil
+            dashboardTotals = nil
         } catch {
             Log.info("Cost totals fetch failed: \(error.localizedDescription)")
-            if costTotals == nil {
+            if dashboardTotals == nil {
                 isEnterpriseTeam = false
             }
         }
     }
 
-    private func refreshCostTotals(
+    private func refreshDashboardTotals(
         cookieHeader: String,
         data: UsageDisplayData,
         userInfo: UserInfoResponse
     ) async {
         guard data.membershipType?.lowercased() == "enterprise" else {
             isEnterpriseTeam = false
-            costTotals = nil
+            dashboardTotals = nil
             return
         }
 
         guard let teamId = await resolveTeamId(cookieHeader: cookieHeader) else {
             isEnterpriseTeam = false
-            costTotals = nil
+            dashboardTotals = nil
             return
         }
 
@@ -944,20 +1000,22 @@ final class UsageViewModel {
         }
         guard let userId = cachedUserId else {
             isEnterpriseTeam = false
-            costTotals = nil
+            dashboardTotals = nil
             return
         }
 
         do {
-            let events = try await Self.collectUsageEvents(
+            let collection = try await Self.collectUsageEvents(
                 apiClient: apiClient,
                 cookieHeader: cookieHeader,
                 teamId: teamId,
                 userId: userId,
                 pageSize: Self.usageEventsPageSize,
-                maxPages: Self.usageEventsMaxPages
+                maxSafetyPages: Self.usageEventsMaxSafetyPages
             )
-            costTotals = events.costTotals()
+            dashboardTotals = collection.events.dashboardTotals(
+                weekEventsIncomplete: collection.weekEventsIncomplete
+            )
             isEnterpriseTeam = true
         } catch APIError.forbidden {
             Log.info("Usage events fetch returned 403 — clearing enterprise cache")
@@ -965,10 +1023,10 @@ final class UsageViewModel {
             cachedUserId = nil
             cachedOnDemandLimitDollars = nil
             isEnterpriseTeam = false
-            costTotals = nil
+            dashboardTotals = nil
         } catch {
             Log.info("Cost totals fetch failed: \(error.localizedDescription)")
-            if costTotals == nil {
+            if dashboardTotals == nil {
                 isEnterpriseTeam = false
             }
         }
@@ -1022,7 +1080,7 @@ final class UsageViewModel {
         authState = .loggedOut
         usageData = nil
         errorMessage = nil
-        costTotals = nil
+        dashboardTotals = nil
         weeklyData = nil
         isEnterpriseTeam = false
         cachedTeamId = nil
@@ -1082,6 +1140,16 @@ final class UsageViewModel {
     func setMenuBarDisplayMode(_ mode: Int) {
         menuBarDisplayMode = mode
         UserDefaults.standard.set(mode, for: .menuBarDisplayMode)
+    }
+
+    func setUsagePopoverView(_ view: UsagePopoverView) {
+        usagePopoverView = view
+        UserDefaults.standard.set(view.rawValue, for: .usagePopoverView)
+    }
+
+    func setDailyTimezone(_ timezone: UsageDayTimezone) {
+        dailyTimezone = timezone
+        UserDefaults.standard.set(timezone.rawValue, for: .dailyTimezone)
     }
 
     func setAppStatusNotificationEnabled(_ enabled: Bool) {
@@ -1244,6 +1312,14 @@ final class UsageViewModel {
         }
         if let enabled = defaults.object(for: .activityRefreshEnabled) as? Bool {
             activityRefreshEnabled = enabled
+        }
+        if let raw = defaults.object(for: .usagePopoverView) as? Int,
+           let view = UsagePopoverView(rawValue: raw) {
+            usagePopoverView = view
+        }
+        if let raw = defaults.object(for: .dailyTimezone) as? Int,
+           let timezone = UsageDayTimezone(rawValue: raw) {
+            dailyTimezone = timezone
         }
     }
 

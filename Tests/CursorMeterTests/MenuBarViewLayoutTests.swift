@@ -10,7 +10,7 @@ import XCTest
 final class MenuBarViewLayoutTests: XCTestCase {
 
     /// Inner content width available to rootStack.
-    private static let innerWidth: CGFloat = 240
+    private static let innerWidth: CGFloat = 260
 
     override func tearDown() {
         MockURLProtocol.requestHandler = nil

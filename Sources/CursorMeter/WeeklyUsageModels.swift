@@ -10,6 +10,21 @@ struct FilteredUsageEventsResponse: Codable, Sendable {
     let usageEventsDisplay: [UsageEvent]
 }
 
+struct TokenUsage: Codable, Sendable {
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let cacheReadTokens: Int?
+    let totalCents: Double?
+
+    var totalCentsSafe: Double {
+        guard let v = totalCents, v.isFinite else { return 0 }
+        return v
+    }
+
+    var inputTokensSafe: Int { inputTokens ?? 0 }
+    var outputTokensSafe: Int { outputTokens ?? 0 }
+}
+
 struct UsageEvent: Codable, Sendable {
     /// UTC epoch milliseconds as a string (e.g. "1780402687672").
     let timestamp: String
@@ -25,17 +40,20 @@ struct UsageEvent: Codable, Sendable {
     /// the user's on-demand cap; for other kinds it's a fair-value reference
     /// not billed to the user. Fractional cents (e.g. 95.69) are normal.
     let chargedCents: Double?
+    let tokenUsage: TokenUsage?
 
     init(
         timestamp: String,
         requestsCosts: Double? = nil,
         kind: String? = nil,
-        chargedCents: Double? = nil
+        chargedCents: Double? = nil,
+        tokenUsage: TokenUsage? = nil
     ) {
         self.timestamp = timestamp
         self.requestsCosts = requestsCosts
         self.kind = kind
         self.chargedCents = chargedCents
+        self.tokenUsage = tokenUsage
     }
 
     /// `Date` parsed from `timestamp`. Returns nil for malformed input.

@@ -114,42 +114,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         guard let button = statusItem?.button else { return }
         if jumpCoordinator?.isSwapping == true { return }
 
-        if let totals = viewModel.costTotals, viewModel.authState == .loggedIn {
-            button.image = nil
-            button.imagePosition = .noImage
-            button.title = totals.menuBarTitle
-            button.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-            return
+        switch viewModel.authState {
+        case .loggedIn:
+            applyMenuBarDollarTitle(to: button)
+        case .loginRequired:
+            button.title = ""
+            button.imagePosition = .imageOnly
+            button.image = CircularProgressIcon.loginRequiredImage()
+        case .loggedOut:
+            button.title = ""
+            button.imagePosition = .imageOnly
+            button.image = CircularProgressIcon.idleImage()
         }
-
-        button.title = ""
-        button.imagePosition = .imageOnly
-        button.image = currentRingImage()
     }
 
-    /// Builds the ring/idle image that should currently occupy the menu bar slot,
-    /// based on the latest `UsageDisplayData` and the user's display-mode setting.
-    /// Pure read of view-model state — no side effects. Reused by the
-    /// `JumpEffectCoordinator` to restore the slot after an emoji swap.
-    private func currentRingImage() -> NSImage {
-        guard let data = viewModel.usageData else {
-            return viewModel.authState == .loginRequired
-                ? CircularProgressIcon.loginRequiredImage()
-                : CircularProgressIcon.idleImage()
+    /// Menu bar shows total-usage today · week (no ring icons when logged in).
+    private func applyMenuBarDollarTitle(to button: NSButton) {
+        button.image = nil
+        button.imagePosition = .noImage
+        if let totals = viewModel.dashboardTotals {
+            button.title = totals.menuBarTitle(dayTimezone: viewModel.dailyTimezone)
+        } else if viewModel.isLoading {
+            button.title = "…"
+        } else {
+            button.title = "— · —"
         }
-        let mode = data.isPercentOnly ? 2 : viewModel.menuBarDisplayMode
-        switch mode {
-        case 2:
-            return CircularProgressIcon.menuBarImageWithPercent(percent: data.percentUsed)
-        case 1:
-            return CircularProgressIcon.menuBarImageWithText(
-                percent: data.percentUsed,
-                usedText: data.menuBarUsedText,
-                limitText: data.menuBarLimitText
-            )
-        default:
-            return CircularProgressIcon.menuBarImage(percent: data.percentUsed)
-        }
+        button.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
     }
 
     @objc private func statusItemClicked() {
@@ -293,8 +283,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             statusItem: statusItem,
             viewModel: viewModel,
             notifier: notificationManager,
-            restoreImage: { [weak self] in
-                self?.currentRingImage() ?? CircularProgressIcon.idleImage()
+            restoreMenuBar: { [weak self] in
+                guard let self, let button = self.statusItem?.button else { return }
+                if self.viewModel.authState == .loggedIn {
+                    self.applyMenuBarDollarTitle(to: button)
+                } else {
+                    self.updateStatusItem()
+                }
             }
         )
         jumpCoordinator = coordinator
@@ -309,9 +304,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     // after onChange because `withObservationTracking` is one-shot.
     private func observeStatusItem() {
         withObservationTracking {
-            _ = viewModel.usageData
-            _ = viewModel.costTotals
-            _ = viewModel.menuBarDisplayMode
+            _ = viewModel.dashboardTotals
+            _ = viewModel.dailyTimezone
+            _ = viewModel.isLoading
             _ = viewModel.authState
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -430,7 +425,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             // does not participate in @Observable change tracking on its own.
             _ = viewModel.lastUpdateCheckResult
             _ = viewModel.refreshInterval
-            _ = viewModel.costTotals
+            _ = viewModel.dashboardTotals
+            _ = viewModel.usagePopoverView
+            _ = viewModel.dailyTimezone
             _ = viewModel.weeklyData
             _ = viewModel.isEnterpriseTeam
             _ = viewModel.weeklyChartEnabled
