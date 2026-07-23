@@ -115,11 +115,11 @@ final class MenuBarPopoverViewController: NSViewController {
         buildLayout()
 
         NSLayoutConstraint.activate([
-            rootStack.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
-            rootStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -6),
-            rootStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
-            rootStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
-            container.widthAnchor.constraint(equalToConstant: 280),
+            rootStack.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+            rootStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
+            rootStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            rootStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            container.widthAnchor.constraint(equalToConstant: 320),
         ])
     }
 
@@ -178,7 +178,7 @@ final class MenuBarPopoverViewController: NSViewController {
     }
 
     private func publishCurrentSize() {
-        let size = NSSize(width: 280, height: ceil(rootStack.fittingSize.height + 12))
+        let size = NSSize(width: 320, height: ceil(rootStack.fittingSize.height + 16))
         preferredContentSize = size
         onContentSizeChange?(size)
     }
@@ -241,7 +241,7 @@ final class MenuBarPopoverViewController: NSViewController {
     private func buildDataStack() {
         dataStack.orientation = .vertical
         dataStack.alignment   = .leading
-        dataStack.spacing     = 2
+        dataStack.spacing     = 6
         dataStack.translatesAutoresizingMaskIntoConstraints = false
 
         // --- User info row ---
@@ -371,7 +371,9 @@ final class MenuBarPopoverViewController: NSViewController {
         bottomRow.translatesAutoresizingMaskIntoConstraints = false
 
         resetLabel.font      = NSFont.systemFont(ofSize: 10, weight: .regular)
-        resetLabel.textColor = NSColor.tertiaryLabelColor
+        resetLabel.textColor = NSColor.secondaryLabelColor
+        resetLabel.maximumNumberOfLines = 2
+        resetLabel.preferredMaxLayoutWidth = 296
         resetLabel.lineBreakMode = .byTruncatingTail
         resetLabel.setContentCompressionResistancePriority(
             .init(NSLayoutConstraint.Priority.fittingSizeCompression.rawValue - 1),
